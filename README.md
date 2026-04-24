@@ -1,44 +1,36 @@
-# AWS Cost Reporter → Last9
+# AWS Cost Reporter
 
-Sends AWS billing data to Last9 as OpenTelemetry metrics. Two integration options:
+You're already paying for AWS. You might as well know exactly what you're paying for, broken down by service, account, and region — right inside Last9 where the rest of your observability lives.
 
-| | [aws-cost-explorer](./aws-cost-explorer/) | [aws-cur](./aws-cur/) |
-|---|---|---|
-| **Setup time** | Minutes | 24h+ (CUR generation) |
-| **Data source** | Cost Explorer API | S3 parquet (CUR files) |
-| **Granularity** | Service / account / region | + resource IDs, cost allocation tags |
-| **Deploy** | CloudFormation or `deploy.sh` | Docker |
-| **Best for** | Quick start | Detailed analysis, tag-based cost allocation |
+This repo ships two integrations. Pick one.
 
-## Quick start
+## aws-cost-explorer — start here
 
-### Cost Explorer (recommended for most teams)
+No S3 bucket. No CUR setup. No waiting 24 hours for data.
 
-```bash
-# CloudFormation — upload aws-cost-explorer/cloudformation.yaml to AWS console
-# Fill in OtlpHeaders with your Last9 token → Create stack
+One CloudFormation stack. One parameter. Done.
 
-# Or via CLI:
-cd aws-cost-explorer
-OTLP_HEADERS="Authorization=Basic <token>" ./deploy.sh
+```
+Upload cloudformation.yaml → fill in your Last9 token → Create stack
 ```
 
-### CUR / S3
+A Lambda runs in your AWS account every day, calls the Cost Explorer API, and sends `aws.cost.unblended` and `aws.cost.amortized` to Last9. That's it. No servers. No credentials lying around. $0/month to run.
 
-```bash
-cd aws-cur
-cp .env.example .env  # set CUR_S3_BUCKET, CUR_REPORT_NAME, OTLP_HEADERS
-docker compose up
-```
+→ [aws-cost-explorer/](./aws-cost-explorer/)
+
+## aws-cur — when you need more
+
+If you want cost broken down by individual EC2 instance, S3 bucket, or custom team/environment tags, you need the Cost and Usage Report. It's more setup (enable CUR, wait 24h for first data, point it at S3), but it gives you line-item granularity that Cost Explorer can't.
+
+→ [aws-cur/](./aws-cur/)
 
 ## Metrics
 
-Both integrations emit:
+Both integrations send the same core metrics to Last9:
 
-| Metric | Unit | Description |
-|---|---|---|
-| `aws.cost.unblended` | USD | Daily unblended cost |
-| `aws.cost.amortized` | USD | Daily cost with RI/SP effective rates |
-| `aws.usage.quantity` | 1 | Daily usage amount (CUR only) |
+| Metric | What it tells you |
+|---|---|
+| `aws.cost.unblended` | What AWS actually charged, per service per day |
+| `aws.cost.amortized` | Same, but with RI and Savings Plan costs spread across usage (the honest number) |
 
-Query `aws.cost.unblended` in [Last9 Metrics](https://app.last9.io/metrics) and group by `aws.service`.
+Query `aws.cost.unblended` in Last9, group by `aws.service`. That's your cost dashboard.
