@@ -66,8 +66,14 @@ docker compose up
 
 | Metric | Unit | Dimensions |
 |---|---|---|
-| `aws.cost.unblended` | USD | `aws.service`, `aws.account.id`, `aws.region` |
+| `aws.cost.unblended` | USD | `aws.service`, `aws.account.id`, `aws.region`, `cost.date` |
 | `aws.cost.amortized` | USD | same — RI and Savings Plan effective rates applied |
+
+`cost.date` (`YYYY-MM-DD`) encodes the billing date as a label so each day forms a distinct Prometheus series. This matters when `DAYS_BACK > 1`: without it, all fetched days share identical labels and only the last sample survives per series. At the default `DAYS_BACK=1`, `cost.date` adds one unique label value per run with no cardinality overhead.
+
+## Dashboard
+
+Import `last9-dashboard.json` into Last9 for a pre-built 14-panel cost dashboard covering spend totals, daily trends, top services, and per-account breakdown.
 
 ## Security
 
