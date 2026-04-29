@@ -32,6 +32,8 @@ jobs:
         env:
           OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost
         run: python test_parse.py
+      - name: Validate dashboard JSON
+        run: python -m json.tool aws-cost-explorer/last9-dashboard.json > /dev/null
 
   lint-cur:
     name: Lint / aws-cur

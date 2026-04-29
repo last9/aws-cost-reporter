@@ -128,6 +128,7 @@ def send_otlp_metrics(rows: list[dict]) -> None:
             {"key": "aws.service", "value": {"stringValue": row["service"]}},
             {"key": "aws.account.id", "value": {"stringValue": row["account_id"]}},
             {"key": "aws.region", "value": {"stringValue": row["region"]}},
+            {"key": "cost.date", "value": {"stringValue": row["date"]}},
         ]
         if row["unblended"] != 0.0:
             unblended_dps.append(
