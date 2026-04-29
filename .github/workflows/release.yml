@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    name: Build Lambda zip and publish release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build aws-cost-explorer zip
+        run: |
+          BUILD=$(mktemp -d)
+          pip install --quiet -r aws-cost-explorer/requirements.txt -t "$BUILD"
+          cp aws-cost-explorer/main.py "$BUILD/"
+          (cd "$BUILD" && zip -qr "$OLDPWD/aws-cost-explorer.zip" .)
+          rm -rf "$BUILD"
+
+      - name: Build aws-cur zip
+        run: |
+          BUILD=$(mktemp -d)
+          pip install --quiet -r aws-cur/requirements.txt -t "$BUILD"
+          cp aws-cur/main.py "$BUILD/"
+          (cd "$BUILD" && zip -qr "$OLDPWD/aws-cur.zip" .)
+          rm -rf "$BUILD"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            aws-cost-explorer.zip
+            aws-cur.zip
+          generate_release_notes: true

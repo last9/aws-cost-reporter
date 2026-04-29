@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-cost-explorer:
+    name: Lint / aws-cost-explorer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check aws-cost-explorer/
+      - run: ruff format --check aws-cost-explorer/
+
+  test-cost-explorer:
+    name: Test / aws-cost-explorer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r aws-cost-explorer/requirements.txt
+      - name: Run unit tests
+        working-directory: aws-cost-explorer
+        run: python test_parse.py
+
+  lint-cur:
+    name: Lint / aws-cur
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check aws-cur/
+      - run: ruff format --check aws-cur/
+
+  test-cur:
+    name: Test / aws-cur
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r aws-cur/requirements.txt
+      - name: Run smoke test
+        working-directory: aws-cur
+        env:
+          CI: "true"
+          CUR_S3_BUCKET: local
+          CUR_REPORT_NAME: local
+          COST_ALLOCATION_TAGS: team,environment
+        run: python test_local.py

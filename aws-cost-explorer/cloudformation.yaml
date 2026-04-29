@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AWS Cost Explorer → Last9 via OpenTelemetry metrics.
+  Deploys a Lambda function triggered daily by EventBridge that fetches
+  AWS cost data and exports it to Last9 as OTel gauge metrics.
+
+Parameters:
+  OtlpHeaders:
+    Type: String
+    Description: "Last9 OTLP auth header — get from Last9 dashboard → Integrations → OTLP (e.g. Authorization=Basic xxxx)"
+    NoEcho: true
+
+  OtlpEndpoint:
+    Type: String
+    Description: "Last9 OTLP endpoint — get from Last9 dashboard → Integrations → OTLP"
+
+  LambdaS3Bucket:
+    Type: String
+    Description: "S3 bucket containing the packaged Lambda zip. Run deploy.sh USE_CF=1 to build and upload it."
+
+  LambdaS3Key:
+    Type: String
+    Default: aws-cost-reporter.zip
+    Description: "S3 key of the Lambda zip file."
+
+  DaysBack:
+    Type: Number
+    Default: 1
+    Description: "Days of cost history to fetch per run. Use 1 for steady-state daily runs. Set to 30+ for initial backfill, then reduce to 1."
+
+  Schedule:
+    Type: String
+    Default: rate(1 day)
+    Description: EventBridge schedule expression (e.g. rate(1 day) or cron(0 6 * * ? *))
+
+  ServiceName:
+    Type: String
+    Default: aws-cost-reporter
+    Description: Service name shown in Last9 and used as the Lambda function name
+
+Resources:
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ServiceName}-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CostExplorerRead
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ce:GetCostAndUsage
+                Resource: "*"
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref ServiceName
+      Runtime: python3.13
+      Handler: main.lambda_handler
+      Role: !GetAtt ExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          OTEL_EXPORTER_OTLP_ENDPOINT: !Ref OtlpEndpoint
+          OTEL_EXPORTER_OTLP_HEADERS: !Ref OtlpHeaders
+          OTEL_SERVICE_NAME: !Ref ServiceName
+          DAYS_BACK: !Ref DaysBack
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref LambdaS3Key
+
+  ScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ServiceName}-schedule"
+      ScheduleExpression: !Ref Schedule
+      State: ENABLED
+      Targets:
+        - Id: CostReporterTarget
+          Arn: !GetAtt Function.Arn
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduleRule.Arn
+
+Outputs:
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt Function.Arn
+
+  ScheduleArn:
+    Description: EventBridge schedule rule ARN
+    Value: !GetAtt ScheduleRule.Arn
+
+  TestCommand:
+    Description: Run this to test immediately after deploy
+    Value: !Sub "aws lambda invoke --function-name ${ServiceName} --region ${AWS::Region} /tmp/out.json && cat /tmp/out.json"
