@@ -29,6 +29,8 @@ jobs:
       - run: pip install -r aws-cost-explorer/requirements.txt
       - name: Run unit tests
         working-directory: aws-cost-explorer
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost
         run: python test_parse.py
 
   lint-cur:
@@ -59,4 +61,5 @@ jobs:
           CUR_S3_BUCKET: local
           CUR_REPORT_NAME: local
           COST_ALLOCATION_TAGS: team,environment
+          OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost
         run: python test_local.py
