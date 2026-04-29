@@ -66,10 +66,18 @@ docker compose up
 
 | Metric | Unit | Dimensions |
 |---|---|---|
-| `aws.cost.unblended` | USD | `aws.service`, `aws.account.id`, `aws.region`, `cost.date` |
-| `aws.cost.amortized` | USD | same — RI and Savings Plan effective rates applied |
+| `aws.cost.unblended` | USD | `aws.service`, `aws.account.id`, `cost.date` (by-account series) |
+| `aws.cost.unblended` | USD | `aws.service`, `aws.region`, `cost.date` (by-region series) |
+| `aws.cost.amortized` | USD | same two series — RI and Savings Plan effective rates applied |
 
-`cost.date` (`YYYY-MM-DD`) encodes the billing date as a label so each day forms a distinct Prometheus series. This matters when `DAYS_BACK > 1`: without it, all fetched days share identical labels and only the last sample survives per series. At the default `DAYS_BACK=1`, `cost.date` adds one unique label value per run with no cardinality overhead.
+Each run makes two Cost Explorer calls (the API allows max 2 GroupBy dimensions per call). The first groups by `SERVICE + LINKED_ACCOUNT`, the second by `SERVICE + REGION`. Both emit to the same metric names but with different label sets, forming distinct series in Last9.
+
+To query by account: `sum by (aws_account_id) (aws_cost_unblended_USD)`  
+To query by region: `sum by (aws_region) (aws_cost_unblended_USD)`
+
+> **Need all three dimensions together** (`service + account + region`)? Switch to the [AWS CUR integration](../aws-cur/) — it has full line-item granularity.
+
+`cost.date` (`YYYY-MM-DD`) encodes the billing date as a label so each day forms a distinct series. This matters when `DAYS_BACK > 1`: without it, all fetched days share identical labels and only the last sample survives per series. At the default `DAYS_BACK=1`, `cost.date` adds one unique label value per run with no cardinality overhead.
 
 ## Dashboard
 

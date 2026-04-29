@@ -5,7 +5,7 @@ Polls the AWS Cost Explorer API and exports cost metrics to Last9.
 No CUR setup or S3 bucket required — data is available within minutes.
 
 Metrics exported:
-  aws.cost.unblended  (USD) — daily unblended cost per service/account/region
+  aws.cost.unblended  (USD) — daily unblended cost per service/account and per service/region
   aws.cost.amortized  (USD) — daily amortized cost (includes RI/SP effective rates)
 
 Deployment modes:
@@ -57,14 +57,10 @@ def _date_to_ns(date_str: str) -> str:
 # ── Cost Explorer fetch ────────────────────────────────────────────────────────
 
 
-def fetch_costs(ce: object) -> list[dict]:
-    """
-    Fetch daily costs grouped by SERVICE, LINKED_ACCOUNT, REGION.
-    Returns flat list of {date, service, account_id, region, unblended, amortized}.
-    """
-    end = date.today()
-    start = end - timedelta(days=DAYS_BACK)
-
+def _fetch_grouped(
+    ce: object, start: date, end: date, group_keys: list[str]
+) -> list[dict]:
+    """Single paginated CE GetCostAndUsage call. Max 2 group_keys (API limit)."""
     rows: list[dict] = []
     next_token: str | None = None
 
@@ -73,11 +69,7 @@ def fetch_costs(ce: object) -> list[dict]:
             "TimePeriod": {"Start": str(start), "End": str(end)},
             "Granularity": "DAILY",
             "Metrics": ["UnblendedCost", "AmortizedCost"],
-            "GroupBy": [
-                {"Type": "DIMENSION", "Key": "SERVICE"},
-                {"Type": "DIMENSION", "Key": "LINKED_ACCOUNT"},
-                {"Type": "DIMENSION", "Key": "REGION"},
-            ],
+            "GroupBy": [{"Type": "DIMENSION", "Key": k} for k in group_keys],
         }
         if next_token:
             kwargs["NextPageToken"] = next_token
@@ -87,7 +79,7 @@ def fetch_costs(ce: object) -> list[dict]:
         for result in resp.get("ResultsByTime", []):
             day = result["TimePeriod"]["Start"]
             for group in result.get("Groups", []):
-                service, account_id, region = group["Keys"]
+                values = group["Keys"]
                 unblended = float(group["Metrics"]["UnblendedCost"]["Amount"])
                 amortized = float(group["Metrics"]["AmortizedCost"]["Amount"])
                 if unblended == 0.0 and amortized == 0.0:
@@ -95,9 +87,7 @@ def fetch_costs(ce: object) -> list[dict]:
                 rows.append(
                     {
                         "date": day,
-                        "service": service,
-                        "account_id": account_id,
-                        "region": region,
+                        "keys": dict(zip(group_keys, values)),
                         "unblended": unblended,
                         "amortized": amortized,
                     }
@@ -107,7 +97,53 @@ def fetch_costs(ce: object) -> list[dict]:
         if not next_token:
             break
 
-    log.info("Fetched %d cost rows (%s → %s)", len(rows), start, end)
+    return rows
+
+
+def fetch_costs(ce: object) -> list[dict]:
+    """
+    Fetch daily costs via two CE calls (API allows max 2 GroupBy dimensions).
+    Call 1: SERVICE + LINKED_ACCOUNT  → rows include aws.service, aws.account.id
+    Call 2: SERVICE + REGION          → rows include aws.service, aws.region
+    Both sets are exported as separate OTLP datapoints with different label sets.
+    """
+    end = date.today()
+    start = end - timedelta(days=DAYS_BACK)
+
+    by_account = _fetch_grouped(ce, start, end, ["SERVICE", "LINKED_ACCOUNT"])
+    by_region = _fetch_grouped(ce, start, end, ["SERVICE", "REGION"])
+
+    rows = []
+    for r in by_account:
+        rows.append(
+            {
+                "date": r["date"],
+                "service": r["keys"]["SERVICE"],
+                "account_id": r["keys"]["LINKED_ACCOUNT"],
+                "region": "",
+                "unblended": r["unblended"],
+                "amortized": r["amortized"],
+            }
+        )
+    for r in by_region:
+        rows.append(
+            {
+                "date": r["date"],
+                "service": r["keys"]["SERVICE"],
+                "account_id": "",
+                "region": r["keys"]["REGION"],
+                "unblended": r["unblended"],
+                "amortized": r["amortized"],
+            }
+        )
+
+    log.info(
+        "Fetched %d by-account + %d by-region rows (%s → %s)",
+        len(by_account),
+        len(by_region),
+        start,
+        end,
+    )
     return rows
 
 
@@ -124,12 +160,14 @@ def send_otlp_metrics(rows: list[dict]) -> None:
 
     for row in rows:
         time_ns = _date_to_ns(row["date"])
-        attrs = [
-            {"key": "aws.service", "value": {"stringValue": row["service"]}},
-            {"key": "aws.account.id", "value": {"stringValue": row["account_id"]}},
-            {"key": "aws.region", "value": {"stringValue": row["region"]}},
-            {"key": "cost.date", "value": {"stringValue": row["date"]}},
-        ]
+        attrs = [{"key": "aws.service", "value": {"stringValue": row["service"]}}]
+        if row["account_id"]:
+            attrs.append(
+                {"key": "aws.account.id", "value": {"stringValue": row["account_id"]}}
+            )
+        if row["region"]:
+            attrs.append({"key": "aws.region", "value": {"stringValue": row["region"]}})
+        attrs.append({"key": "cost.date", "value": {"stringValue": row["date"]}})
         if row["unblended"] != 0.0:
             unblended_dps.append(
                 {
@@ -153,7 +191,7 @@ def send_otlp_metrics(rows: list[dict]) -> None:
             {
                 "name": "aws.cost.unblended",
                 "unit": "USD",
-                "description": "Daily unblended AWS cost by service, account, and region",
+                "description": "Daily unblended AWS cost by service/account and service/region",
                 "gauge": {"dataPoints": unblended_dps},
             }
         )
