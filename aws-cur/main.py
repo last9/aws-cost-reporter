@@ -282,6 +282,7 @@ def _row_attrs(row: dict) -> list[dict]:
         ("aws.account.id", row.get("account_id", "")),
         ("aws.region", row.get("region", "")),
         ("aws.usage.type", row.get("usage_type", "")),
+        ("cost.date", row.get("date", "")),
     ]:
         if val and str(val) not in ("", "nan", "None"):
             attrs.append({"key": key, "value": {"stringValue": str(val)}})
