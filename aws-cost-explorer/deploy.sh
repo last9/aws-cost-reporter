@@ -122,14 +122,27 @@ else
 
   if aws lambda get-function --function-name "${FUNCTION_NAME}" --region "${AWS_REGION}" &>/dev/null; then
     echo "--> Updating Lambda function"
+    # Lambda serializes updates per function. update-function-code returns as soon
+    # as the upload is accepted, but LastUpdateStatus stays InProgress for several
+    # seconds. Any subsequent update-* / add-permission call during that window
+    # fails with ResourceConflictException. Wait between every state-changing call.
+    aws lambda wait function-updated \
+      --function-name "${FUNCTION_NAME}" \
+      --region "${AWS_REGION}"
     aws lambda update-function-code \
       --function-name "${FUNCTION_NAME}" \
       --zip-file "fileb://${ZIP_PATH}" \
       --region "${AWS_REGION}" >/dev/null
+    aws lambda wait function-updated \
+      --function-name "${FUNCTION_NAME}" \
+      --region "${AWS_REGION}"
     aws lambda update-function-configuration \
       --function-name "${FUNCTION_NAME}" \
       --environment "${ENV_VARS}" \
       --region "${AWS_REGION}" >/dev/null
+    aws lambda wait function-updated \
+      --function-name "${FUNCTION_NAME}" \
+      --region "${AWS_REGION}"
   else
     echo "--> Creating Lambda function"
     aws lambda create-function \
@@ -142,6 +155,10 @@ else
       --memory-size 256 \
       --environment "${ENV_VARS}" \
       --region "${AWS_REGION}" >/dev/null
+    # Newly created functions start in State=Pending; add-permission below requires Active.
+    aws lambda wait function-active \
+      --function-name "${FUNCTION_NAME}" \
+      --region "${AWS_REGION}"
   fi
 
   FUNCTION_ARN=$(aws lambda get-function \
