@@ -69,7 +69,9 @@ def fetch_costs(ce: object) -> list[dict]:
     start = end - timedelta(days=DAYS_BACK)
     period = {"Start": str(start), "End": str(end)}
 
-    accounts_resp = ce.get_dimension_values(TimePeriod=period, Dimension="LINKED_ACCOUNT")
+    accounts_resp = ce.get_dimension_values(
+        TimePeriod=period, Dimension="LINKED_ACCOUNT"
+    )
     accounts = [v["Value"] for v in accounts_resp.get("DimensionValues", [])] or [""]
 
     rows: list[dict] = []
@@ -119,7 +121,10 @@ def fetch_costs(ce: object) -> list[dict]:
 
     log.info(
         "Fetched %d cost rows (%s → %s, %d account(s))",
-        len(rows), start, end, len(accounts),
+        len(rows),
+        start,
+        end,
+        len(accounts),
     )
     return rows
 
@@ -168,7 +173,7 @@ def send_otlp_metrics(rows: list[dict]) -> None:
             {
                 "name": "aws.cost.unblended",
                 "unit": "USD",
-                "description": "Daily unblended AWS cost by service/account and service/region",
+                "description": "Daily unblended AWS cost by service, account, and region",
                 "gauge": {"dataPoints": unblended_dps},
             }
         )
