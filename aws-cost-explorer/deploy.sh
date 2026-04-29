@@ -41,7 +41,7 @@ echo "--> Packaging Lambda"
 BUILD_DIR=$(mktemp -d)
 pip install --quiet -r requirements.txt -t "${BUILD_DIR}"
 cp main.py "${BUILD_DIR}/"
-ZIP_PATH=$(mktemp /tmp/aws-cost-reporter-XXXXXX.zip)
+ZIP_PATH=$(mktemp -u /tmp/aws-cost-reporter-XXXXXX.zip)
 (cd "${BUILD_DIR}" && zip -qr "${ZIP_PATH}" .)
 rm -rf "${BUILD_DIR}"
 
