@@ -5,7 +5,7 @@ Polls the AWS Cost Explorer API and exports cost metrics to Last9.
 No CUR setup or S3 bucket required — data is available within minutes.
 
 Metrics exported:
-  aws.cost.unblended  (USD) — daily unblended cost per service/account and per service/region
+  aws.cost.unblended  (USD) — daily unblended cost per service/account/region
   aws.cost.amortized  (USD) — daily amortized cost (includes RI/SP effective rates)
 
 Deployment modes:
@@ -57,92 +57,69 @@ def _date_to_ns(date_str: str) -> str:
 # ── Cost Explorer fetch ────────────────────────────────────────────────────────
 
 
-def _fetch_grouped(
-    ce: object, start: date, end: date, group_keys: list[str]
-) -> list[dict]:
-    """Single paginated CE GetCostAndUsage call. Max 2 group_keys (API limit)."""
-    rows: list[dict] = []
-    next_token: str | None = None
-
-    while True:
-        kwargs: dict = {
-            "TimePeriod": {"Start": str(start), "End": str(end)},
-            "Granularity": "DAILY",
-            "Metrics": ["UnblendedCost", "AmortizedCost"],
-            "GroupBy": [{"Type": "DIMENSION", "Key": k} for k in group_keys],
-        }
-        if next_token:
-            kwargs["NextPageToken"] = next_token
-
-        resp = ce.get_cost_and_usage(**kwargs)
-
-        for result in resp.get("ResultsByTime", []):
-            day = result["TimePeriod"]["Start"]
-            for group in result.get("Groups", []):
-                values = group["Keys"]
-                unblended = float(group["Metrics"]["UnblendedCost"]["Amount"])
-                amortized = float(group["Metrics"]["AmortizedCost"]["Amount"])
-                if unblended == 0.0 and amortized == 0.0:
-                    continue
-                rows.append(
-                    {
-                        "date": day,
-                        "keys": dict(zip(group_keys, values)),
-                        "unblended": unblended,
-                        "amortized": amortized,
-                    }
-                )
-
-        next_token = resp.get("NextPageToken")
-        if not next_token:
-            break
-
-    return rows
-
-
 def fetch_costs(ce: object) -> list[dict]:
     """
-    Fetch daily costs via two CE calls (API allows max 2 GroupBy dimensions).
-    Call 1: SERVICE + LINKED_ACCOUNT  → rows include aws.service, aws.account.id
-    Call 2: SERVICE + REGION          → rows include aws.service, aws.region
-    Both sets are exported as separate OTLP datapoints with different label sets.
+    Fetch daily costs grouped by SERVICE, REGION, looped per LINKED_ACCOUNT.
+
+    Cost Explorer caps GroupBy at 2 dimensions, so account is applied as an
+    outer Filter to preserve the service × account × region combination.
+    Returns flat list of {date, service, account_id, region, unblended, amortized}.
     """
     end = date.today()
     start = end - timedelta(days=DAYS_BACK)
+    period = {"Start": str(start), "End": str(end)}
 
-    by_account = _fetch_grouped(ce, start, end, ["SERVICE", "LINKED_ACCOUNT"])
-    by_region = _fetch_grouped(ce, start, end, ["SERVICE", "REGION"])
+    accounts_resp = ce.get_dimension_values(TimePeriod=period, Dimension="LINKED_ACCOUNT")
+    accounts = [v["Value"] for v in accounts_resp.get("DimensionValues", [])] or [""]
 
-    rows = []
-    for r in by_account:
-        rows.append(
-            {
-                "date": r["date"],
-                "service": r["keys"]["SERVICE"],
-                "account_id": r["keys"]["LINKED_ACCOUNT"],
-                "region": "",
-                "unblended": r["unblended"],
-                "amortized": r["amortized"],
+    rows: list[dict] = []
+    for account_id in accounts:
+        next_token: str | None = None
+        while True:
+            kwargs: dict = {
+                "TimePeriod": period,
+                "Granularity": "DAILY",
+                "Metrics": ["UnblendedCost", "AmortizedCost"],
+                "GroupBy": [
+                    {"Type": "DIMENSION", "Key": "SERVICE"},
+                    {"Type": "DIMENSION", "Key": "REGION"},
+                ],
             }
-        )
-    for r in by_region:
-        rows.append(
-            {
-                "date": r["date"],
-                "service": r["keys"]["SERVICE"],
-                "account_id": "",
-                "region": r["keys"]["REGION"],
-                "unblended": r["unblended"],
-                "amortized": r["amortized"],
-            }
-        )
+            if account_id:
+                kwargs["Filter"] = {
+                    "Dimensions": {"Key": "LINKED_ACCOUNT", "Values": [account_id]}
+                }
+            if next_token:
+                kwargs["NextPageToken"] = next_token
+
+            resp = ce.get_cost_and_usage(**kwargs)
+
+            for result in resp.get("ResultsByTime", []):
+                day = result["TimePeriod"]["Start"]
+                for group in result.get("Groups", []):
+                    service, region = group["Keys"]
+                    unblended = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                    amortized = float(group["Metrics"]["AmortizedCost"]["Amount"])
+                    if unblended == 0.0 and amortized == 0.0:
+                        continue
+                    rows.append(
+                        {
+                            "date": day,
+                            "service": service,
+                            "account_id": account_id,
+                            "region": region,
+                            "unblended": unblended,
+                            "amortized": amortized,
+                        }
+                    )
+
+            next_token = resp.get("NextPageToken")
+            if not next_token:
+                break
 
     log.info(
-        "Fetched %d by-account + %d by-region rows (%s → %s)",
-        len(by_account),
-        len(by_region),
-        start,
-        end,
+        "Fetched %d cost rows (%s → %s, %d account(s))",
+        len(rows), start, end, len(accounts),
     )
     return rows
 
