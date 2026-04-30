@@ -38,12 +38,18 @@ echo "==> Deploying ${FUNCTION_NAME} to ${AWS_REGION}"
 # ── 1. Package Lambda ──────────────────────────────────────────────────────────
 
 echo "--> Packaging Lambda"
+# trap guarantees temp files are cleaned up even on script failure, preventing
+# stale /tmp/aws-cost-reporter-*.zip files from blocking subsequent runs.
+BUILD_DIR=""
+ZIP_PATH=""
+trap 'rm -rf "${BUILD_DIR:-}" 2>/dev/null || true; rm -f "${ZIP_PATH:-}" 2>/dev/null || true' EXIT
 BUILD_DIR=$(mktemp -d)
 pip install --quiet -r requirements.txt -t "${BUILD_DIR}"
 cp main.py "${BUILD_DIR}/"
 ZIP_PATH=$(mktemp -u /tmp/aws-cost-reporter-XXXXXX.zip)
 (cd "${BUILD_DIR}" && zip -qr "${ZIP_PATH}" .)
 rm -rf "${BUILD_DIR}"
+BUILD_DIR=""
 
 # ── 2a. Deploy via CloudFormation ──────────────────────────────────────────────
 
@@ -83,6 +89,7 @@ else
   ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
   ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
+  ROLE_CREATED=0
   if ! aws iam get-role --role-name "${ROLE_NAME}" &>/dev/null; then
     echo "--> Creating IAM role ${ROLE_NAME}"
     aws iam create-role \
@@ -95,27 +102,34 @@ else
           "Action": "sts:AssumeRole"
         }]
       }' >/dev/null
+    ROLE_CREATED=1
+  else
+    echo "--> IAM role ${ROLE_NAME} already exists; refreshing policies"
+  fi
 
-    aws iam attach-role-policy \
-      --role-name "${ROLE_NAME}" \
-      --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  # Policy attachment runs on every deploy so existing roles pick up new
+  # permissions when main.py adds new AWS API calls (e.g. ce:GetDimensionValues
+  # was added in commit 472af45). attach-role-policy and put-role-policy are
+  # both idempotent: attach is a no-op if already attached, put overwrites.
+  aws iam attach-role-policy \
+    --role-name "${ROLE_NAME}" \
+    --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-    aws iam put-role-policy \
-      --role-name "${ROLE_NAME}" \
-      --policy-name cost-explorer-read \
-      --policy-document '{
-        "Version": "2012-10-17",
-        "Statement": [{
-          "Effect": "Allow",
-          "Action": ["ce:GetCostAndUsage", "ce:GetDimensionValues"],
-          "Resource": "*"
-        }]
-      }'
+  aws iam put-role-policy \
+    --role-name "${ROLE_NAME}" \
+    --policy-name cost-explorer-read \
+    --policy-document '{
+      "Version": "2012-10-17",
+      "Statement": [{
+        "Effect": "Allow",
+        "Action": ["ce:GetCostAndUsage", "ce:GetDimensionValues"],
+        "Resource": "*"
+      }]
+    }'
 
+  if [[ "${ROLE_CREATED}" == "1" ]]; then
     echo "--> Waiting for IAM role to propagate…"
     sleep 10
-  else
-    echo "--> IAM role ${ROLE_NAME} already exists"
   fi
 
   ENV_VARS="Variables={OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT},OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS},OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME},DAYS_BACK=${DAYS_BACK}}"
@@ -178,13 +192,22 @@ else
     --query RuleArn \
     --output text)
 
-  aws lambda add-permission \
+  # Swallow only the "statement already exists" case (ResourceConflictException).
+  # All other failures (regional issues, IAM, throttling) surface and abort.
+  if ! ADD_PERM_OUTPUT=$(aws lambda add-permission \
     --function-name "${FUNCTION_NAME}" \
     --statement-id "${RULE_NAME}" \
     --action lambda:InvokeFunction \
     --principal events.amazonaws.com \
     --source-arn "${RULE_ARN}" \
-    --region "${AWS_REGION}" 2>/dev/null || true
+    --region "${AWS_REGION}" 2>&1); then
+    if echo "${ADD_PERM_OUTPUT}" | grep -q "ResourceConflictException"; then
+      echo "--> EventBridge invoke permission already present"
+    else
+      echo "${ADD_PERM_OUTPUT}" >&2
+      exit 1
+    fi
+  fi
 
   aws events put-targets \
     --rule "${RULE_NAME}" \
@@ -192,7 +215,7 @@ else
     --region "${AWS_REGION}" >/dev/null
 fi
 
-rm -f "${ZIP_PATH}"
+# ZIP_PATH cleanup handled by trap above.
 
 # ── Done ───────────────────────────────────────────────────────────────────────
 
