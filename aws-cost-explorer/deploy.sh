@@ -83,6 +83,7 @@ else
   ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
   ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
+  ROLE_CREATED=false
   if ! aws iam get-role --role-name "${ROLE_NAME}" &>/dev/null; then
     echo "--> Creating IAM role ${ROLE_NAME}"
     aws iam create-role \
@@ -95,27 +96,32 @@ else
           "Action": "sts:AssumeRole"
         }]
       }' >/dev/null
+    ROLE_CREATED=true
+  else
+    echo "--> IAM role ${ROLE_NAME} already exists — reapplying policy (idempotent)"
+  fi
 
-    aws iam attach-role-policy \
-      --role-name "${ROLE_NAME}" \
-      --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  # put-role-policy and attach-role-policy are idempotent — always reapply
+  # so existing roles pick up new permissions when this script changes.
+  aws iam attach-role-policy \
+    --role-name "${ROLE_NAME}" \
+    --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-    aws iam put-role-policy \
-      --role-name "${ROLE_NAME}" \
-      --policy-name cost-explorer-read \
-      --policy-document '{
-        "Version": "2012-10-17",
-        "Statement": [{
-          "Effect": "Allow",
-          "Action": ["ce:GetCostAndUsage", "ce:GetDimensionValues"],
-          "Resource": "*"
-        }]
-      }'
+  aws iam put-role-policy \
+    --role-name "${ROLE_NAME}" \
+    --policy-name cost-explorer-read \
+    --policy-document '{
+      "Version": "2012-10-17",
+      "Statement": [{
+        "Effect": "Allow",
+        "Action": ["ce:GetCostAndUsage", "ce:GetDimensionValues"],
+        "Resource": "*"
+      }]
+    }'
 
+  if [ "${ROLE_CREATED}" = "true" ]; then
     echo "--> Waiting for IAM role to propagate…"
     sleep 10
-  else
-    echo "--> IAM role ${ROLE_NAME} already exists"
   fi
 
   ENV_VARS="Variables={OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT},OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS},OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME},DAYS_BACK=${DAYS_BACK}}"
