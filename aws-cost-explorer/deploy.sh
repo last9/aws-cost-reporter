@@ -128,14 +128,26 @@ else
 
   if aws lambda get-function --function-name "${FUNCTION_NAME}" --region "${AWS_REGION}" &>/dev/null; then
     echo "--> Updating Lambda function"
+    # Wait for any in-flight update before issuing a new one. Without this,
+    # back-to-back invocations of deploy.sh hit ResourceConflictException
+    # ("An update is in progress for resource: …").
+    aws lambda wait function-updated \
+      --function-name "${FUNCTION_NAME}" \
+      --region "${AWS_REGION}" 2>/dev/null || true
     aws lambda update-function-code \
       --function-name "${FUNCTION_NAME}" \
       --zip-file "fileb://${ZIP_PATH}" \
       --region "${AWS_REGION}" >/dev/null
+    aws lambda wait function-updated \
+      --function-name "${FUNCTION_NAME}" \
+      --region "${AWS_REGION}"
     aws lambda update-function-configuration \
       --function-name "${FUNCTION_NAME}" \
       --environment "${ENV_VARS}" \
       --region "${AWS_REGION}" >/dev/null
+    aws lambda wait function-updated \
+      --function-name "${FUNCTION_NAME}" \
+      --region "${AWS_REGION}"
   else
     echo "--> Creating Lambda function"
     aws lambda create-function \
