@@ -20,6 +20,8 @@
 #   DAYS_BACK=1                       (default; use 30+ for initial backfill)
 #   SCHEDULE=rate(1 day)              (default)
 #   OTEL_SERVICE_NAME=aws-cost-reporter
+#   RUNTIME=python3.13                (default; override for Lambda runtime upgrades)
+#   SMOKE_TEST=1                      (default; set to 0 to skip post-deploy invoke)
 
 set -euo pipefail
 
@@ -29,6 +31,8 @@ DAYS_BACK="${DAYS_BACK:-1}"
 SCHEDULE="${SCHEDULE:-rate(1 day)}"
 OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-aws-cost-reporter}"
 USE_CF="${USE_CF:-0}"
+RUNTIME="${RUNTIME:-python3.13}"
+SMOKE_TEST="${SMOKE_TEST:-1}"
 
 : "${OTEL_EXPORTER_OTLP_ENDPOINT:?OTEL_EXPORTER_OTLP_ENDPOINT is required. Get it from Last9 dashboard → Integrations → OTLP}"
 : "${OTEL_EXPORTER_OTLP_HEADERS:?OTEL_EXPORTER_OTLP_HEADERS is required. Set it to: Authorization=Basic <your-last9-token>}"
@@ -42,7 +46,8 @@ echo "--> Packaging Lambda"
 # stale /tmp/aws-cost-reporter-*.zip files from blocking subsequent runs.
 BUILD_DIR=""
 ZIP_PATH=""
-trap 'rm -rf "${BUILD_DIR:-}" 2>/dev/null || true; rm -f "${ZIP_PATH:-}" 2>/dev/null || true' EXIT
+TRAP_ENV_FILE=""
+trap 'rm -rf "${BUILD_DIR:-}" 2>/dev/null || true; rm -f "${ZIP_PATH:-}" "${TRAP_ENV_FILE:-}" 2>/dev/null || true' EXIT
 BUILD_DIR=$(mktemp -d)
 pip install --quiet -r requirements.txt -t "${BUILD_DIR}"
 cp main.py "${BUILD_DIR}/"
@@ -132,7 +137,21 @@ else
     sleep 10
   fi
 
-  ENV_VARS="Variables={OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT},OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS},OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME},DAYS_BACK=${DAYS_BACK}}"
+  # Build environment as JSON via python json.dumps. The shorthand
+  # "Variables={k=v,k=v}" syntax breaks if any value contains '=' or ',' (custom
+  # JWTs, comma-bearing service names). JSON escapes everything correctly.
+  ENV_FILE=$(mktemp /tmp/aws-cost-reporter-env-XXXXXX.json)
+  TRAP_ENV_FILE="${ENV_FILE}"
+  export OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS OTEL_SERVICE_NAME DAYS_BACK
+  python3 -c '
+import json, os
+print(json.dumps({"Variables": {
+    "OTEL_EXPORTER_OTLP_ENDPOINT": os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"],
+    "OTEL_EXPORTER_OTLP_HEADERS": os.environ["OTEL_EXPORTER_OTLP_HEADERS"],
+    "OTEL_SERVICE_NAME": os.environ["OTEL_SERVICE_NAME"],
+    "DAYS_BACK": os.environ["DAYS_BACK"],
+}}))' > "${ENV_FILE}"
+  ENV_VARS="file://${ENV_FILE}"
 
   if aws lambda get-function --function-name "${FUNCTION_NAME}" --region "${AWS_REGION}" &>/dev/null; then
     echo "--> Updating Lambda function"
@@ -152,6 +171,7 @@ else
       --region "${AWS_REGION}"
     aws lambda update-function-configuration \
       --function-name "${FUNCTION_NAME}" \
+      --runtime "${RUNTIME}" \
       --environment "${ENV_VARS}" \
       --region "${AWS_REGION}" >/dev/null
     aws lambda wait function-updated \
@@ -161,7 +181,7 @@ else
     echo "--> Creating Lambda function"
     aws lambda create-function \
       --function-name "${FUNCTION_NAME}" \
-      --runtime python3.13 \
+      --runtime "${RUNTIME}" \
       --role "${ROLE_ARN}" \
       --handler main.lambda_handler \
       --zip-file "fileb://${ZIP_PATH}" \
@@ -224,5 +244,35 @@ echo "✓ Deployed ${FUNCTION_NAME}"
 echo "  Function : ${FUNCTION_ARN}"
 echo "  Schedule : ${SCHEDULE}"
 echo ""
-echo "Test now:"
-echo "  aws lambda invoke --function-name ${FUNCTION_NAME} --region ${AWS_REGION} /tmp/out.json && cat /tmp/out.json"
+
+# ── 4. Smoke test (set SMOKE_TEST=0 to skip) ──────────────────────────────────
+
+if [[ "${SMOKE_TEST}" == "1" ]]; then
+  echo "--> Smoke-testing Lambda (1 invocation)"
+  SMOKE_OUT=$(mktemp /tmp/aws-cost-reporter-smoke-XXXXXX.json)
+  trap 'rm -rf "${BUILD_DIR:-}" 2>/dev/null || true; rm -f "${ZIP_PATH:-}" "${TRAP_ENV_FILE:-}" "${SMOKE_OUT}" 2>/dev/null || true' EXIT
+
+  # --output text + JMESPath returns the literal string "None" for null fields,
+  # which is reliable to test against (avoids brittle JSON grep).
+  FUNCTION_ERROR=$(aws lambda invoke \
+    --function-name "${FUNCTION_NAME}" \
+    --region "${AWS_REGION}" \
+    "${SMOKE_OUT}" \
+    --query 'FunctionError' \
+    --output text)
+
+  echo "    Lambda payload:"
+  sed 's/^/      /' "${SMOKE_OUT}"
+  echo ""
+
+  if [[ "${FUNCTION_ERROR}" != "None" ]]; then
+    echo "✗ Smoke test FAILED — Lambda returned ${FUNCTION_ERROR}. See payload above." >&2
+    echo "  Common causes: missing IAM permission, invalid OTLP endpoint/token, network egress block." >&2
+    exit 1
+  fi
+  echo "✓ Smoke test passed"
+else
+  echo "Smoke test skipped (SMOKE_TEST=${SMOKE_TEST})."
+  echo "Test manually:"
+  echo "  aws lambda invoke --function-name ${FUNCTION_NAME} --region ${AWS_REGION} /tmp/out.json && cat /tmp/out.json"
+fi
