@@ -83,7 +83,7 @@ else
   ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
   ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
-  ROLE_CREATED=false
+  NEW_ROLE=
   if ! aws iam get-role --role-name "${ROLE_NAME}" &>/dev/null; then
     echo "--> Creating IAM role ${ROLE_NAME}"
     aws iam create-role \
@@ -96,13 +96,12 @@ else
           "Action": "sts:AssumeRole"
         }]
       }' >/dev/null
-    ROLE_CREATED=true
+    NEW_ROLE=1
   else
-    echo "--> IAM role ${ROLE_NAME} already exists — reapplying policy (idempotent)"
+    echo "--> IAM role ${ROLE_NAME} already exists — reapplying policy"
   fi
 
-  # put-role-policy and attach-role-policy are idempotent — always reapply
-  # so existing roles pick up new permissions when this script changes.
+  # Reapply on every run so existing roles pick up new permissions.
   aws iam attach-role-policy \
     --role-name "${ROLE_NAME}" \
     --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
@@ -119,7 +118,7 @@ else
       }]
     }'
 
-  if [ "${ROLE_CREATED}" = "true" ]; then
+  if [[ -n "${NEW_ROLE}" ]]; then
     echo "--> Waiting for IAM role to propagate…"
     sleep 10
   fi
@@ -128,16 +127,12 @@ else
 
   if aws lambda get-function --function-name "${FUNCTION_NAME}" --region "${AWS_REGION}" &>/dev/null; then
     echo "--> Updating Lambda function"
-    # Wait for any in-flight update before issuing a new one. Without this,
-    # back-to-back invocations of deploy.sh hit ResourceConflictException
-    # ("An update is in progress for resource: …").
-    aws lambda wait function-updated \
-      --function-name "${FUNCTION_NAME}" \
-      --region "${AWS_REGION}" 2>/dev/null || true
     aws lambda update-function-code \
       --function-name "${FUNCTION_NAME}" \
       --zip-file "fileb://${ZIP_PATH}" \
       --region "${AWS_REGION}" >/dev/null
+    # update-function-code is async — wait for it before mutating config,
+    # otherwise update-function-configuration hits ResourceConflictException.
     aws lambda wait function-updated \
       --function-name "${FUNCTION_NAME}" \
       --region "${AWS_REGION}"
@@ -145,9 +140,6 @@ else
       --function-name "${FUNCTION_NAME}" \
       --environment "${ENV_VARS}" \
       --region "${AWS_REGION}" >/dev/null
-    aws lambda wait function-updated \
-      --function-name "${FUNCTION_NAME}" \
-      --region "${AWS_REGION}"
   else
     echo "--> Creating Lambda function"
     aws lambda create-function \
