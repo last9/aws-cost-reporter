@@ -20,6 +20,9 @@
 #   DAYS_BACK=1                       (default; use 30+ for initial backfill)
 #   SCHEDULE=rate(1 day)              (default)
 #   OTEL_SERVICE_NAME=aws-cost-reporter
+#   COST_TAG_KEYS=Project,Environment (optional; emits aws.tag.<key> attribute.
+#                                      Tags must be activated in AWS Billing →
+#                                      Cost Allocation Tags first)
 
 set -euo pipefail
 
@@ -28,6 +31,7 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 DAYS_BACK="${DAYS_BACK:-1}"
 SCHEDULE="${SCHEDULE:-rate(1 day)}"
 OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-aws-cost-reporter}"
+COST_TAG_KEYS="${COST_TAG_KEYS:-}"
 USE_CF="${USE_CF:-0}"
 
 : "${OTEL_EXPORTER_OTLP_ENDPOINT:?OTEL_EXPORTER_OTLP_ENDPOINT is required. Get it from Last9 dashboard → Integrations → OTLP}"
@@ -68,7 +72,8 @@ if [[ "${USE_CF}" == "1" ]]; then
       LambdaS3Key="${CF_S3_KEY}" \
       DaysBack="${DAYS_BACK}" \
       Schedule="${SCHEDULE}" \
-      ServiceName="${OTEL_SERVICE_NAME}"
+      ServiceName="${OTEL_SERVICE_NAME}" \
+      CostTagKeys="${COST_TAG_KEYS}"
 
   FUNCTION_ARN=$(aws cloudformation describe-stacks \
     --stack-name "${STACK_NAME}" \
@@ -118,7 +123,7 @@ else
     echo "--> IAM role ${ROLE_NAME} already exists"
   fi
 
-  ENV_VARS="Variables={OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT},OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS},OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME},DAYS_BACK=${DAYS_BACK}}"
+  ENV_VARS="Variables={OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT},OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS},OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME},DAYS_BACK=${DAYS_BACK},COST_TAG_KEYS=${COST_TAG_KEYS}}"
 
   if aws lambda get-function --function-name "${FUNCTION_NAME}" --region "${AWS_REGION}" &>/dev/null; then
     echo "--> Updating Lambda function"

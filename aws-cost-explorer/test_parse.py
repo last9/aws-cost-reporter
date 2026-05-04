@@ -9,7 +9,7 @@ import os
 
 os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost")
 
-from main import _date_to_ns, _parse_headers  # noqa: E402
+from main import _date_to_ns, _parse_headers, _sanitize_tag_key  # noqa: E402
 
 
 def test_parse_headers_single() -> None:
@@ -45,6 +45,25 @@ def test_date_to_ns_noon_utc() -> None:
     ns = int(_date_to_ns("2026-01-15"))
     # 2026-01-15T12:00:00Z = 1768478400 seconds
     assert ns == 1768478400 * 1_000_000_000
+
+
+def test_sanitize_tag_key_simple() -> None:
+    assert _sanitize_tag_key("Project") == "project"
+
+
+def test_sanitize_tag_key_punctuation() -> None:
+    # AWS allows '+ - = . _ : / @' in tag keys; Prom labels do not
+    assert _sanitize_tag_key("cost-center") == "cost_center"
+    assert _sanitize_tag_key("aws:Project") == "aws_project"
+    assert _sanitize_tag_key("env.tier") == "env_tier"
+
+
+def test_sanitize_tag_key_collapses_leading_trailing() -> None:
+    assert _sanitize_tag_key("__Project__") == "project"
+
+
+def test_sanitize_tag_key_all_invalid() -> None:
+    assert _sanitize_tag_key("@@@") == "unknown"
 
 
 if __name__ == "__main__":
