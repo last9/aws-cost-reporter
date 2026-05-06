@@ -88,6 +88,58 @@ Import `last9-dashboard.json` into Last9 for a pre-built 14-panel cost dashboard
 
 After the Lambda runs, query `aws.cost.unblended` in [Last9 Metrics](https://app.last9.io/metrics) and group by `aws.service`.
 
+## Troubleshooting
+
+### `AccessDeniedException` on `ce:GetCostAndUsage` or `ce:GetDimensionValues`
+
+The Lambda role is missing required Cost Explorer permissions. This typically happens when an existing role pre-dates a release that added new permissions. Re-run `./deploy.sh` — it now reapplies the policy on every run. If you can't redeploy, attach the policy manually:
+
+```bash
+aws iam put-role-policy \
+  --role-name aws-cost-reporter-role \
+  --policy-name cost-explorer-read \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": ["ce:GetCostAndUsage", "ce:GetDimensionValues"],
+      "Resource": "*"
+    }]
+  }'
+```
+
+Wait ~2 minutes for the policy to propagate, then retry the Lambda.
+
+### `ResourceConflictException: An update is in progress`
+
+A previous `update-function-code` or `update-function-configuration` call is still in flight. Wait, then retry:
+
+```bash
+aws lambda wait function-updated --function-name aws-cost-reporter --region <region>
+./deploy.sh
+```
+
+### `ValidationException: Only two values for GroupBy are allowed`
+
+You're running an outdated build. Pull latest main and redeploy — `fetch_costs` now respects the Cost Explorer 2-dim GroupBy cap by looping per linked account.
+
+### `mktemp: mkstemp failed on /tmp/aws-cost-reporter-XXXXXX.zip: File exists`
+
+Outdated `deploy.sh`. Pull latest main — `mktemp -u` is now used so `zip` can create a fresh archive.
+
+### Wrong region for Lambda
+
+By default Lambda is deployed to `us-east-1`. To deploy elsewhere, set `AWS_REGION` before running deploy.sh — do **not** edit `deploy.sh`:
+
+```bash
+AWS_REGION=ap-south-1 \
+OTEL_EXPORTER_OTLP_ENDPOINT=<endpoint> \
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <token>" \
+./deploy.sh
+```
+
+The Cost Explorer API itself is global (always called against `us-east-1` internally) — `AWS_REGION` controls only where the Lambda function and EventBridge rule live.
+
 ---
 
 > **Need usage type breakdown (`BoxUsage:m5.xlarge`, `DataTransfer-Out-Bytes`, etc.)?**

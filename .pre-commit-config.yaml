@@ -1,0 +1,14 @@
+# Mirrors .github/workflows/ci.yml so CI lint failures are caught locally.
+# Setup once per clone:
+#   pip install pre-commit
+#   pre-commit install
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        files: ^aws-cost-explorer/
+      - id: ruff-format
+        args: [--check]
+        files: ^aws-cost-explorer/
