@@ -16,7 +16,7 @@
       },
       {
         "id": "",
-        "name": "Total Spend (last 7 days)",
+        "name": "Total Spend (Loaded)",
         "visualization": {
           "type": "stat",
           "full_width": false
@@ -31,7 +31,7 @@
             "unit": "USD",
             "legend": {
               "type": "custom",
-              "value": "$ 7d"
+              "value": "$ total"
             }
           }
         ],
@@ -47,22 +47,22 @@
       },
       {
         "id": "",
-        "name": "Total Spend (last 30 days)",
+        "name": "Days Loaded",
         "visualization": {
           "type": "stat",
           "full_width": false
         },
         "queries": [
           {
-            "expr": "sum(sum by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[30d]))) or vector(0)",
+            "expr": "count(count by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))) or vector(0)",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
             "query_type": "promql",
-            "unit": "USD",
+            "unit": "",
             "legend": {
               "type": "custom",
-              "value": "$ 30d"
+              "value": "days"
             }
           }
         ],
@@ -73,19 +73,19 @@
           "y": 0
         },
         "datasource_id": "",
-        "unit": "USD",
+        "unit": "",
         "telemetry": "metrics"
       },
       {
         "id": "",
-        "name": "Yesterday",
+        "name": "Daily Average",
         "visualization": {
           "type": "stat",
           "full_width": false
         },
         "queries": [
           {
-            "expr": "sum(last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[2d])) or vector(0)",
+            "expr": "(sum(sum by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))) / count(count by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d])))) or vector(0)",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
@@ -93,7 +93,7 @@
             "unit": "USD",
             "legend": {
               "type": "custom",
-              "value": "$ D-1"
+              "value": "$/day"
             }
           }
         ],
@@ -109,14 +109,14 @@
       },
       {
         "id": "",
-        "name": "Daily Average (last 30 days)",
+        "name": "Latest Pushed Day",
         "visualization": {
           "type": "stat",
           "full_width": false
         },
         "queries": [
           {
-            "expr": "avg(sum by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[30d]))) or vector(0)",
+            "expr": "sum(last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[1d])) or vector(0)",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
@@ -124,7 +124,7 @@
             "unit": "USD",
             "legend": {
               "type": "custom",
-              "value": "$/day"
+              "value": "$ latest"
             }
           }
         ],
@@ -151,14 +151,18 @@
       },
       {
         "id": "",
-        "name": "Daily Total Cost",
+        "name": "Cost by Date",
         "visualization": {
-          "type": "timeseries",
-          "full_width": false
+          "type": "bar",
+          "full_width": false,
+          "bar_config": {
+            "orientation": "vertical",
+            "stacked": false
+          }
         },
         "queries": [
           {
-            "expr": "sum(last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[1d]))",
+            "expr": "sum by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
@@ -166,7 +170,7 @@
             "unit": "USD",
             "legend": {
               "type": "custom",
-              "value": "Unblended"
+              "value": "{{cost_date}}"
             },
             "legend_placement": "bottom"
           }
@@ -183,14 +187,18 @@
       },
       {
         "id": "",
-        "name": "Unblended vs Amortized",
+        "name": "Unblended vs Amortized by Date",
         "visualization": {
-          "type": "timeseries",
-          "full_width": false
+          "type": "bar",
+          "full_width": false,
+          "bar_config": {
+            "orientation": "vertical",
+            "stacked": false
+          }
         },
         "queries": [
           {
-            "expr": "sum(last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[1d]))",
+            "expr": "sum by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
@@ -198,12 +206,12 @@
             "unit": "USD",
             "legend": {
               "type": "custom",
-              "value": "Unblended"
+              "value": "Unblended {{cost_date}}"
             },
             "legend_placement": "bottom"
           },
           {
-            "expr": "sum(last_over_time(aws_cost_amortized_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[1d]))",
+            "expr": "sum by (cost_date) (last_over_time(aws_cost_amortized_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))",
             "type": "range",
             "name": "B",
             "telemetry": "metrics",
@@ -211,7 +219,7 @@
             "unit": "USD",
             "legend": {
               "type": "custom",
-              "value": "Amortized"
+              "value": "Amortized {{cost_date}}"
             },
             "legend_placement": "bottom"
           }
@@ -228,14 +236,18 @@
       },
       {
         "id": "",
-        "name": "Daily Cost by Service",
+        "name": "Cost by Date and Service",
         "visualization": {
-          "type": "timeseries",
-          "full_width": true
+          "type": "bar",
+          "full_width": true,
+          "bar_config": {
+            "orientation": "vertical",
+            "stacked": true
+          }
         },
         "queries": [
           {
-            "expr": "sum by (aws_service) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[1d]))",
+            "expr": "sum by (cost_date, aws_service) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
@@ -243,7 +255,7 @@
             "unit": "USD",
             "legend": {
               "type": "custom",
-              "value": "{{aws_service}}"
+              "value": "{{aws_service}} ({{cost_date}})"
             },
             "legend_placement": "bottom"
           }
@@ -260,14 +272,18 @@
       },
       {
         "id": "",
-        "name": "Daily Cost by Region",
+        "name": "Cost by Date and Region",
         "visualization": {
-          "type": "timeseries",
-          "full_width": true
+          "type": "bar",
+          "full_width": true,
+          "bar_config": {
+            "orientation": "vertical",
+            "stacked": true
+          }
         },
         "queries": [
           {
-            "expr": "sum by (aws_region) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[1d]))",
+            "expr": "sum by (cost_date, aws_region) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
@@ -275,7 +291,7 @@
             "unit": "USD",
             "legend": {
               "type": "custom",
-              "value": "{{aws_region}}"
+              "value": "{{aws_region}} ({{cost_date}})"
             },
             "legend_placement": "bottom"
           }
@@ -303,7 +319,7 @@
       },
       {
         "id": "",
-        "name": "Top 10 Services (last 30 days)",
+        "name": "Top 10 Services (Loaded)",
         "visualization": {
           "type": "bar",
           "full_width": false,
@@ -314,7 +330,7 @@
         },
         "queries": [
           {
-            "expr": "topk(10, sum by (aws_service) (sum by (aws_service, cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[30d]))))",
+            "expr": "topk(10, sum by (aws_service) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d])))",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
@@ -339,7 +355,7 @@
       },
       {
         "id": "",
-        "name": "Spend by Region (last 30 days)",
+        "name": "Spend by Region (Loaded)",
         "visualization": {
           "type": "bar",
           "full_width": false,
@@ -350,7 +366,7 @@
         },
         "queries": [
           {
-            "expr": "sum by (aws_region) (sum by (aws_region, cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[30d])))",
+            "expr": "sum by (aws_region) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
@@ -375,7 +391,7 @@
       },
       {
         "id": "",
-        "name": "Spend by Account (last 30 days)",
+        "name": "Spend by Account (Loaded)",
         "visualization": {
           "type": "bar",
           "full_width": true,
@@ -386,7 +402,7 @@
         },
         "queries": [
           {
-            "expr": "sum by (aws_account_id) (sum by (aws_account_id, cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[30d])))",
+            "expr": "sum by (aws_account_id) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))",
             "type": "range",
             "name": "A",
             "telemetry": "metrics",
@@ -404,6 +420,240 @@
           "w": 12,
           "x": 0,
           "y": 5
+        },
+        "datasource_id": "",
+        "unit": "USD",
+        "telemetry": "metrics"
+      },
+      {
+        "id": "",
+        "name": "By Tag",
+        "visualization": {
+          "type": "section",
+          "full_width": true
+        },
+        "queries": [],
+        "layout": null,
+        "datasource_id": ""
+      },
+      {
+        "id": "",
+        "name": "Top 10 Tag Values (Loaded)",
+        "visualization": {
+          "type": "bar",
+          "full_width": true,
+          "bar_config": {
+            "orientation": "horizontal",
+            "stacked": false
+          }
+        },
+        "queries": [
+          {
+            "expr": "topk(10, sum by (aws_tag_name) (last_over_time(aws_cost_unblended_USD{aws_tag_name!=\"\", aws_tag_name=~\"$tag\", aws_account_id=~\"$account\", aws_service=~\"$service\"}[7d])))",
+            "type": "range",
+            "name": "A",
+            "telemetry": "metrics",
+            "query_type": "promql",
+            "unit": "USD",
+            "legend": {
+              "type": "custom",
+              "value": "{{aws_tag_name}}"
+            },
+            "legend_placement": "right"
+          }
+        ],
+        "layout": {
+          "h": 10,
+          "w": 12,
+          "x": 0,
+          "y": 6
+        },
+        "datasource_id": "",
+        "unit": "USD",
+        "telemetry": "metrics"
+      },
+      {
+        "id": "",
+        "name": "Untagged Spend %",
+        "visualization": {
+          "type": "stat",
+          "full_width": false
+        },
+        "queries": [
+          {
+            "expr": "(sum(last_over_time(aws_cost_unblended_USD{aws_tag_name=\"untagged\", aws_account_id=~\"$account\", aws_service=~\"$service\"}[7d])) / sum(last_over_time(aws_cost_unblended_USD{aws_tag_name!=\"\", aws_account_id=~\"$account\", aws_service=~\"$service\"}[7d]))) * 100 or vector(0)",
+            "type": "range",
+            "name": "A",
+            "telemetry": "metrics",
+            "query_type": "promql",
+            "unit": "%",
+            "legend": {
+              "type": "custom",
+              "value": "% untagged"
+            }
+          }
+        ],
+        "layout": {
+          "h": 6,
+          "w": 12,
+          "x": 0,
+          "y": 7
+        },
+        "datasource_id": "",
+        "unit": "%",
+        "telemetry": "metrics"
+      },
+      {
+        "id": "",
+        "name": "Cost by Tag over Time",
+        "visualization": {
+          "type": "timeseries",
+          "full_width": true
+        },
+        "queries": [
+          {
+            "expr": "sum by (aws_tag_name, cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_tag_name=~\"$tag\", aws_tag_name!=\"\", aws_account_id=~\"$account\", aws_service=~\"$service\"}[7d]))",
+            "type": "range",
+            "name": "A",
+            "telemetry": "metrics",
+            "query_type": "promql",
+            "unit": "USD",
+            "legend": {
+              "type": "custom",
+              "value": "{{aws_tag_name}} {{cost_date}}"
+            },
+            "legend_placement": "right"
+          }
+        ],
+        "layout": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 7
+        },
+        "datasource_id": "",
+        "unit": "USD",
+        "telemetry": "metrics"
+      },
+      {
+        "id": "",
+        "name": "By Period",
+        "visualization": {
+          "type": "section",
+          "full_width": true
+        },
+        "queries": [],
+        "layout": null,
+        "datasource_id": ""
+      },
+      {
+        "id": "",
+        "name": "Cost by Day",
+        "visualization": {
+          "type": "bar",
+          "full_width": true,
+          "bar_config": {
+            "orientation": "vertical",
+            "stacked": false
+          }
+        },
+        "queries": [
+          {
+            "expr": "sum by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[30d]))",
+            "type": "range",
+            "name": "A",
+            "telemetry": "metrics",
+            "query_type": "promql",
+            "unit": "USD",
+            "legend": {
+              "type": "custom",
+              "value": "{{cost_date}}"
+            }
+          }
+        ],
+        "layout": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        },
+        "datasource_id": "",
+        "unit": "USD",
+        "telemetry": "metrics"
+      },
+      {
+        "id": "",
+        "name": "Cost by Month",
+        "visualization": {
+          "type": "bar",
+          "full_width": false,
+          "bar_config": {
+            "orientation": "vertical",
+            "stacked": false
+          }
+        },
+        "queries": [
+          {
+            "expr": "sum by (cost_month) (label_replace(last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[90d]), \"cost_month\", \"$1\", \"cost_date\", \"(\\\\d{4}-\\\\d{2}).*\"))",
+            "type": "range",
+            "name": "A",
+            "telemetry": "metrics",
+            "query_type": "promql",
+            "unit": "USD",
+            "legend": {
+              "type": "custom",
+              "value": "{{cost_month}}"
+            }
+          }
+        ],
+        "layout": {
+          "h": 8,
+          "w": 6,
+          "x": 0,
+          "y": 9
+        },
+        "datasource_id": "",
+        "unit": "USD",
+        "telemetry": "metrics"
+      },
+      {
+        "id": "",
+        "name": "Last 7d vs Previous 7d",
+        "visualization": {
+          "type": "stat",
+          "full_width": false
+        },
+        "queries": [
+          {
+            "expr": "sum(sum by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d]))) or vector(0)",
+            "type": "range",
+            "name": "A",
+            "telemetry": "metrics",
+            "query_type": "promql",
+            "unit": "USD",
+            "legend": {
+              "type": "custom",
+              "value": "$ last 7d"
+            }
+          },
+          {
+            "expr": "sum(sum by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\", aws_service=~\"$service\"}[7d] offset 7d))) or vector(0)",
+            "type": "range",
+            "name": "B",
+            "telemetry": "metrics",
+            "query_type": "promql",
+            "unit": "USD",
+            "legend": {
+              "type": "custom",
+              "value": "$ prev 7d"
+            }
+          }
+        ],
+        "layout": {
+          "h": 8,
+          "w": 6,
+          "x": 6,
+          "y": 9
         },
         "datasource_id": "",
         "unit": "USD",
@@ -446,6 +696,20 @@
         "source": "aws_service",
         "matches": [
           "aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\"}"
+        ],
+        "multiple": true,
+        "internal": false,
+        "current_values": [
+          ".*"
+        ]
+      },
+      {
+        "display_name": "Tag",
+        "target": "tag",
+        "type": "label",
+        "source": "aws_tag_name",
+        "matches": [
+          "aws_cost_unblended_USD{aws_tag_name!=\"\", aws_account_id=~\"$account\", aws_service=~\"$service\"}"
         ],
         "multiple": true,
         "internal": false,
