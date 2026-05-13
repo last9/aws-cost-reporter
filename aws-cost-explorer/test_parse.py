@@ -151,6 +151,28 @@ def test_list_linked_accounts_empty_falls_back() -> None:
     assert _list_linked_accounts(ce, {"Start": "x", "End": "y"}) == [""]
 
 
+def test_list_linked_accounts_exception_emits_loud_warning() -> None:
+    # Policy: account-attribution fallback is degraded, not silent. Both the
+    # exception and empty paths must warn loudly so multi-account regressions
+    # are visible in logs.
+    class _Boom:
+        def get_dimension_values(self, **_: object) -> dict:
+            raise RuntimeError("AccessDeniedException")
+
+    cap = _LogCapture()
+    with patch.object(main, "log", cap):
+        _list_linked_accounts(_Boom(), {"Start": "x", "End": "y"})
+    assert any("DEGRADED" in w and "aws.account.id" in w for w in cap.warnings)
+
+
+def test_list_linked_accounts_empty_emits_loud_warning() -> None:
+    ce = _FakeCEAccounts([{"DimensionValues": []}])
+    cap = _LogCapture()
+    with patch.object(main, "log", cap):
+        _list_linked_accounts(ce, {"Start": "x", "End": "y"})
+    assert any("DEGRADED" in w for w in cap.warnings)
+
+
 # ── fetch_tag_costs ───────────────────────────────────────────────────────────
 
 

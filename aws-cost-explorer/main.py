@@ -92,6 +92,12 @@ def _list_linked_accounts(ce: object, period: dict) -> list[str]:
     Returns [""] when the dimension is empty or the call fails (single-account
     setups, missing ce:GetDimensionValues permission). Empty string is treated
     downstream as "no account filter".
+
+    Policy choice — availability over per-account correctness: on lookup
+    failure, we still emit one cost stream (collapsed across accounts, no
+    aws.account.id label) rather than dropping all data. Acceptable for
+    single-account setups; misleading for multi-account orgs. Both fallback
+    paths emit a loud DEGRADED warning so the regression is visible in logs.
     """
     accounts: list[str] = []
     next_token: str | None = None
@@ -107,15 +113,24 @@ def _list_linked_accounts(ce: object, period: dict) -> list[str]:
                 break
     except Exception as exc:
         log.warning(
-            "get_dimension_values(LINKED_ACCOUNT) failed (%s); "
-            "falling back to caller account",
+            "[DEGRADED] get_dimension_values(LINKED_ACCOUNT) failed: %s. "
+            "Falling back to ONE unfiltered cost call. "
+            "Consequences: (1) costs collapse across accounts in multi-account "
+            "orgs; (2) emitted rows have NO aws.account.id label; "
+            "(3) dashboards/alerts that group by aws.account.id will be "
+            "incomplete or misleading. "
+            "Fix: grant ce:GetDimensionValues to the Lambda role.",
             exc,
         )
         return [""]
     if not accounts:
-        log.info(
-            "LINKED_ACCOUNT dimension empty; falling back to caller account "
-            "(single-account or insufficient ce:GetDimensionValues permission)"
+        log.warning(
+            "[DEGRADED] LINKED_ACCOUNT dimension returned zero values. "
+            "Falling back to ONE unfiltered cost call. "
+            "Expected in single-account setups (safe). In multi-account "
+            "orgs this indicates insufficient ce:GetDimensionValues "
+            "permission — emitted rows will have NO aws.account.id label "
+            "and account-level dashboards will be misleading."
         )
         return [""]
     return accounts
