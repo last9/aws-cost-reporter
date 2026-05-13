@@ -59,6 +59,7 @@ docker compose up
 | `DAYS_BACK` | No | `1` | Days of history to fetch per run. Set to `30`+ for initial backfill, then drop to `1`. |
 | `POLL_INTERVAL_SECONDS` | No | `86400` | Re-poll interval for Docker mode |
 | `OTEL_SERVICE_NAME` | No | `aws-cost-reporter` | Service name in Last9 |
+| `COST_TAG_KEYS` | No | _(empty)_ | Comma-separated cost-allocation tag keys to break cost down by (e.g. `Project,Environment`). Each key adds one extra CE call per account per run (~$0.01/call). Tags must be activated in AWS Billing → Cost Allocation Tags first; pre-activation cost data has no tag attribution. |
 
 \* Lambda uses the attached IAM role — no credentials needed.
 
@@ -66,10 +67,12 @@ docker compose up
 
 | Metric | Unit | Dimensions |
 |---|---|---|
-| `aws.cost.unblended` | USD | `aws.service`, `aws.account.id`, `aws.region`, `cost.date` |
+| `aws.cost.unblended` | USD | `aws.service`, `aws.account.id`, `aws.region`, `cost.date` (+ `aws.tag.<key>` when `COST_TAG_KEYS` is set) |
 | `aws.cost.amortized` | USD | same — RI and Savings Plan effective rates applied |
 
 The CE API caps `GroupBy` at 2 dimensions. Each run calls `GetDimensionValues` to list linked accounts, then runs one `GetCostAndUsage` per account filtered by `LINKED_ACCOUNT` and grouped by `SERVICE + REGION`. This preserves all three dimensions in a single series without exceeding the API limit.
+
+When `COST_TAG_KEYS` is set, an additional `GetCostAndUsage` call per account per tag key is issued with `GroupBy = [SERVICE, TAG:<key>]`. Tag rows are emitted as a parallel series (without `aws.region`), so existing region-keyed queries are unaffected. Untagged resources surface as `aws.tag.<key>="untagged"`.
 
 `cost.date` (`YYYY-MM-DD`) encodes the billing date as a label so each day forms a distinct series. This matters when `DAYS_BACK > 1`: without it, all fetched days share identical labels and only the last sample survives per series. At the default `DAYS_BACK=1`, `cost.date` adds one unique label value per run with no cardinality overhead.
 
@@ -139,6 +142,7 @@ The Cost Explorer API itself is global (always called against `us-east-1` intern
 
 ---
 
-> **Need usage type breakdown (`BoxUsage:m5.xlarge`, `DataTransfer-Out-Bytes`, etc.) or cost allocation tags?**
-> Cost Explorer groups by service, account, and region only. For line-item granularity,
-> switch to the [AWS CUR integration](../aws-cur/) — it adds `aws.usage.type` and `aws.tag.*` dimensions.
+> **Need usage type breakdown (`BoxUsage:m5.xlarge`, `DataTransfer-Out-Bytes`, etc.)?**
+> Cost Explorer doesn't expose usage-type granularity. For line-item detail,
+> switch to the [AWS CUR integration](../aws-cur/) — it adds `aws.usage.type`
+> and arbitrary `aws.tag.*` dimensions without prior tag activation.

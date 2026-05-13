@@ -20,6 +20,9 @@
 #   DAYS_BACK=1                       (default; use 30+ for initial backfill)
 #   SCHEDULE=rate(1 day)              (default)
 #   OTEL_SERVICE_NAME=aws-cost-reporter
+#   COST_TAG_KEYS=Project,Environment (optional; emits aws.tag.<key> attribute.
+#                                      Tags must be activated in AWS Billing →
+#                                      Cost Allocation Tags first)
 #   RUNTIME=python3.13                (default; override for Lambda runtime upgrades)
 #   SMOKE_TEST=1                      (set to 1 to invoke Lambda after deploy as a sanity check)
 
@@ -30,6 +33,7 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 DAYS_BACK="${DAYS_BACK:-1}"
 SCHEDULE="${SCHEDULE:-rate(1 day)}"
 OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-aws-cost-reporter}"
+COST_TAG_KEYS="${COST_TAG_KEYS:-}"
 USE_CF="${USE_CF:-0}"
 RUNTIME="${RUNTIME:-python3.13}"
 SMOKE_TEST="${SMOKE_TEST:-0}"
@@ -79,7 +83,8 @@ if [[ "${USE_CF}" == "1" ]]; then
       LambdaS3Key="${CF_S3_KEY}" \
       DaysBack="${DAYS_BACK}" \
       Schedule="${SCHEDULE}" \
-      ServiceName="${OTEL_SERVICE_NAME}"
+      ServiceName="${OTEL_SERVICE_NAME}" \
+      CostTagKeys="${COST_TAG_KEYS}"
 
   FUNCTION_ARN=$(aws cloudformation describe-stacks \
     --stack-name "${STACK_NAME}" \
@@ -136,10 +141,11 @@ else
 
   # Build environment as JSON via python json.dumps. The shorthand
   # "Variables={k=v,k=v}" syntax breaks if any value contains '=' or ',' (custom
-  # JWTs, comma-bearing service names). JSON escapes everything correctly.
+  # JWTs, comma-bearing service names, comma-separated COST_TAG_KEYS). JSON
+  # escapes everything correctly.
   ENV_FILE=$(mktemp /tmp/aws-cost-reporter-env-XXXXXX.json)
   TRAP_ENV_FILE="${ENV_FILE}"
-  export OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS OTEL_SERVICE_NAME DAYS_BACK
+  export OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS OTEL_SERVICE_NAME DAYS_BACK COST_TAG_KEYS
   python3 -c '
 import json, os
 print(json.dumps({"Variables": {
@@ -147,6 +153,7 @@ print(json.dumps({"Variables": {
     "OTEL_EXPORTER_OTLP_HEADERS": os.environ["OTEL_EXPORTER_OTLP_HEADERS"],
     "OTEL_SERVICE_NAME": os.environ["OTEL_SERVICE_NAME"],
     "DAYS_BACK": os.environ["DAYS_BACK"],
+    "COST_TAG_KEYS": os.environ["COST_TAG_KEYS"],
 }}))' > "${ENV_FILE}"
   ENV_VARS="file://${ENV_FILE}"
 

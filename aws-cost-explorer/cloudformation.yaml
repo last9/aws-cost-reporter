@@ -38,6 +38,11 @@ Parameters:
     Default: aws-cost-reporter
     Description: Service name shown in Last9 and used as the Lambda function name
 
+  CostTagKeys:
+    Type: String
+    Default: ""
+    Description: "Optional comma-separated list of cost-allocation tag keys to break costs down by (e.g. Project,Environment). Tags must be activated in AWS Billing → Cost Allocation Tags. Leave blank to disable."
+
 Resources:
 
   ExecutionRole:
@@ -79,6 +84,7 @@ Resources:
           OTEL_EXPORTER_OTLP_HEADERS: !Ref OtlpHeaders
           OTEL_SERVICE_NAME: !Ref ServiceName
           DAYS_BACK: !Ref DaysBack
+          COST_TAG_KEYS: !Ref CostTagKeys
       Code:
         S3Bucket: !Ref LambdaS3Bucket
         S3Key: !Ref LambdaS3Key
