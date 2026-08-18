@@ -19,7 +19,7 @@ import logging
 import os
 import signal
 import time
-from datetime import date, timedelta, timezone, datetime
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import requests
@@ -66,7 +66,7 @@ def fetch_costs(ce: object) -> list[dict]:
     outer Filter to preserve the service × account × region combination.
     Returns flat list of {date, service, account_id, region, unblended, amortized}.
     """
-    end = date.today()
+    end = datetime.now(tz=timezone.utc).date()
     start = end - timedelta(days=DAYS_BACK)
     period = {"Start": str(start), "End": str(end)}
 
