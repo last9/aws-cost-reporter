@@ -19,7 +19,7 @@ import logging
 import os
 import signal
 import time
-from datetime import date, timedelta, timezone, datetime
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import requests
@@ -36,6 +36,7 @@ POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "86400"))
 OTLP_ENDPOINT = os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"]
 OTLP_HEADERS_RAW = os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", "")
 OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "aws-cost-reporter")
+CUSTOM_LABELS_RAW = os.environ.get("CUSTOM_LABELS", "")
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ def fetch_costs(ce: object) -> list[dict]:
     outer Filter to preserve the service × account × region combination.
     Returns flat list of {date, service, account_id, region, unblended, amortized}.
     """
-    end = date.today()
+    end = datetime.now(tz=timezone.utc).date()
     start = end - timedelta(days=DAYS_BACK)
     period = {"Start": str(start), "End": str(end)}
 
@@ -139,10 +140,13 @@ def send_otlp_metrics(rows: list[dict]) -> None:
 
     unblended_dps: list[dict] = []
     amortized_dps: list[dict] = []
+    custom_labels = _parse_headers(CUSTOM_LABELS_RAW)
 
     for row in rows:
         time_ns = _date_to_ns(row["date"])
         attrs = [{"key": "aws.service", "value": {"stringValue": row["service"]}}]
+        for k, v in custom_labels.items():
+            attrs.append({"key": k, "value": {"stringValue": v}})
         if row["account_id"]:
             attrs.append(
                 {"key": "aws.account.id", "value": {"stringValue": row["account_id"]}}

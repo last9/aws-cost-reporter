@@ -9,7 +9,7 @@ import os
 
 os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost")
 
-from main import _date_to_ns, _parse_headers  # noqa: E402
+from main import _date_to_ns, _parse_headers
 
 
 def test_parse_headers_single() -> None:
@@ -55,7 +55,7 @@ if __name__ == "__main__":
             fn()
             print(f"  ✓ {fn.__name__}")
             passed += 1
-        except Exception as exc:
+        except AssertionError as exc:
             print(f"  ✗ {fn.__name__}: {exc}")
             failed += 1
     print(f"\n{passed} passed, {failed} failed")

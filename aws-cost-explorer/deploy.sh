@@ -20,6 +20,7 @@
 #   DAYS_BACK=1                       (default; use 30+ for initial backfill)
 #   SCHEDULE=rate(1 day)              (default)
 #   OTEL_SERVICE_NAME=aws-cost-reporter
+#   CUSTOM_LABELS=env=prod,team=platform   (optional; extra labels on every exported metric)
 #   RUNTIME=python3.13                (default; override for Lambda runtime upgrades)
 #   SMOKE_TEST=1                      (set to 1 to invoke Lambda after deploy as a sanity check)
 
@@ -30,6 +31,7 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 DAYS_BACK="${DAYS_BACK:-1}"
 SCHEDULE="${SCHEDULE:-rate(1 day)}"
 OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-aws-cost-reporter}"
+CUSTOM_LABELS="${CUSTOM_LABELS:-}"
 USE_CF="${USE_CF:-0}"
 RUNTIME="${RUNTIME:-python3.13}"
 SMOKE_TEST="${SMOKE_TEST:-0}"
@@ -49,7 +51,7 @@ ZIP_PATH=""
 TRAP_ENV_FILE=""
 trap 'rm -rf "${BUILD_DIR:-}" 2>/dev/null || true; rm -f "${ZIP_PATH:-}" "${TRAP_ENV_FILE:-}" 2>/dev/null || true' EXIT
 BUILD_DIR=$(mktemp -d)
-pip install --quiet -r requirements.txt -t "${BUILD_DIR}"
+pip3 install --quiet -r requirements.txt -t "${BUILD_DIR}"
 cp main.py "${BUILD_DIR}/"
 ZIP_PATH=$(mktemp -u /tmp/aws-cost-reporter-XXXXXX.zip)
 (cd "${BUILD_DIR}" && zip -qr "${ZIP_PATH}" .)
@@ -79,7 +81,8 @@ if [[ "${USE_CF}" == "1" ]]; then
       LambdaS3Key="${CF_S3_KEY}" \
       DaysBack="${DAYS_BACK}" \
       Schedule="${SCHEDULE}" \
-      ServiceName="${OTEL_SERVICE_NAME}"
+      ServiceName="${OTEL_SERVICE_NAME}" \
+      CustomLabels="${CUSTOM_LABELS}"
 
   FUNCTION_ARN=$(aws cloudformation describe-stacks \
     --stack-name "${STACK_NAME}" \
@@ -139,7 +142,7 @@ else
   # JWTs, comma-bearing service names). JSON escapes everything correctly.
   ENV_FILE=$(mktemp /tmp/aws-cost-reporter-env-XXXXXX.json)
   TRAP_ENV_FILE="${ENV_FILE}"
-  export OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS OTEL_SERVICE_NAME DAYS_BACK
+  export OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS OTEL_SERVICE_NAME DAYS_BACK CUSTOM_LABELS
   python3 -c '
 import json, os
 print(json.dumps({"Variables": {
@@ -147,6 +150,7 @@ print(json.dumps({"Variables": {
     "OTEL_EXPORTER_OTLP_HEADERS": os.environ["OTEL_EXPORTER_OTLP_HEADERS"],
     "OTEL_SERVICE_NAME": os.environ["OTEL_SERVICE_NAME"],
     "DAYS_BACK": os.environ["DAYS_BACK"],
+    "CUSTOM_LABELS": os.environ["CUSTOM_LABELS"],
 }}))' > "${ENV_FILE}"
   ENV_VARS="file://${ENV_FILE}"
 
