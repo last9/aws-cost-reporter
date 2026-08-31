@@ -68,8 +68,13 @@ docker compose up
 |---|---|---|
 | `aws.cost.unblended` | USD | `aws.service`, `aws.account.id`, `aws.region`, `cost.date` |
 | `aws.cost.amortized` | USD | same — RI and Savings Plan effective rates applied |
+| `aws.cost.undiscounted` | USD | same — list-price cost, ignoring credits/discounts/Savings-Plan fees |
 
 The CE API caps `GroupBy` at 2 dimensions. Each run calls `GetDimensionValues` to list linked accounts, then runs one `GetCostAndUsage` per account filtered by `LINKED_ACCOUNT` and grouped by `SERVICE + REGION`. This preserves all three dimensions in a single series without exceeding the API limit.
+
+### `aws.cost.undiscounted` — why a third metric
+
+An account under a promotional or committed AWS credit shows `Credit == -Usage` in Cost Explorer every day, so `UnblendedCost`/`AmortizedCost` read ~$0 while real infra consumption continues unseen. `aws.cost.undiscounted` is a separate `GetCostAndUsage` call filtered to `RECORD_TYPE IN (Usage, SavingsPlanCoveredUsage)` — the only record types that carry positive consumption at on-demand value — so it stays meaningful even when the credit fully offsets the standard metrics. It's a positive filter (include only these types) rather than an exclude-list of every known discount/credit RECORD_TYPE, so a new AWS discount type added later is automatically excluded instead of silently leaking into the total.
 
 `cost.date` (`YYYY-MM-DD`) encodes the billing date as a label so each day forms a distinct series. This matters when `DAYS_BACK > 1`: without it, all fetched days share identical labels and only the last sample survives per series. At the default `DAYS_BACK=1`, `cost.date` adds one unique label value per run with no cardinality overhead.
 
