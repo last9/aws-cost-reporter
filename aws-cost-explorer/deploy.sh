@@ -18,6 +18,11 @@
 #   FUNCTION_NAME=aws-cost-reporter   (default)
 #   AWS_REGION=us-east-1              (default)
 #   DAYS_BACK=1                       (default; use 30+ for initial backfill)
+#   CAPTURE_OFFSET_DAYS=3             (default; Cost Explorer's daily estimate keeps
+#                                      revising for ~2-3 days after the day passes, and
+#                                      a day can never be re-fetched/corrected once
+#                                      written — this shifts the fetch window back so
+#                                      each day is captured only after it has settled)
 #   SCHEDULE=rate(1 day)              (default)
 #   OTEL_SERVICE_NAME=aws-cost-reporter
 #   CUSTOM_LABELS=env=prod,team=platform   (optional; extra labels on every exported metric)
@@ -29,6 +34,7 @@ set -euo pipefail
 FUNCTION_NAME="${FUNCTION_NAME:-aws-cost-reporter}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 DAYS_BACK="${DAYS_BACK:-1}"
+CAPTURE_OFFSET_DAYS="${CAPTURE_OFFSET_DAYS:-3}"
 SCHEDULE="${SCHEDULE:-rate(1 day)}"
 OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-aws-cost-reporter}"
 CUSTOM_LABELS="${CUSTOM_LABELS:-}"
@@ -142,7 +148,7 @@ else
   # JWTs, comma-bearing service names). JSON escapes everything correctly.
   ENV_FILE=$(mktemp /tmp/aws-cost-reporter-env-XXXXXX.json)
   TRAP_ENV_FILE="${ENV_FILE}"
-  export OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS OTEL_SERVICE_NAME DAYS_BACK CUSTOM_LABELS
+  export OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS OTEL_SERVICE_NAME DAYS_BACK CAPTURE_OFFSET_DAYS CUSTOM_LABELS
   python3 -c '
 import json, os
 print(json.dumps({"Variables": {
@@ -150,6 +156,7 @@ print(json.dumps({"Variables": {
     "OTEL_EXPORTER_OTLP_HEADERS": os.environ["OTEL_EXPORTER_OTLP_HEADERS"],
     "OTEL_SERVICE_NAME": os.environ["OTEL_SERVICE_NAME"],
     "DAYS_BACK": os.environ["DAYS_BACK"],
+    "CAPTURE_OFFSET_DAYS": os.environ["CAPTURE_OFFSET_DAYS"],
     "CUSTOM_LABELS": os.environ["CUSTOM_LABELS"],
 }}))' > "${ENV_FILE}"
   ENV_VARS="file://${ENV_FILE}"
