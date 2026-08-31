@@ -90,6 +90,35 @@ def test_fetch_undiscounted_costs_filters_by_record_type() -> None:
     assert record_type_filter["Values"] == UNDISCOUNTED_RECORD_TYPES
 
 
+def test_fetch_costs_respects_capture_offset_days() -> None:
+    """The fetch window must end CAPTURE_OFFSET_DAYS ago, not "today" —
+    Cost Explorer's daily estimate keeps revising for ~2-3 days after the day
+    passes, and a day can never be corrected once written to Last9, so the
+    default (3) must actually shift the window, not just exist as an unused
+    env var."""
+    import importlib
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    os.environ["CAPTURE_OFFSET_DAYS"] = "5"
+    try:
+        import main
+        importlib.reload(main)
+
+        stub = _StubCE([""], [])
+        main.fetch_costs(stub)
+
+        assert len(stub.calls) == 1
+        period = stub.calls[0]["TimePeriod"]
+        expected_end = datetime.now(tz=timezone.utc).date() - timedelta(days=5)
+        assert period["End"] == str(expected_end), (
+            f"expected End={expected_end} (today - CAPTURE_OFFSET_DAYS=5), got {period['End']}"
+        )
+    finally:
+        del os.environ["CAPTURE_OFFSET_DAYS"]
+        importlib.reload(main)
+
+
 def test_fetch_undiscounted_costs_skips_zero_amounts() -> None:
     stub = _StubCE([""], [{
         "TimePeriod": {"Start": "2026-08-30"},

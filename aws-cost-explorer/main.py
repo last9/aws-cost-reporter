@@ -14,6 +14,15 @@ Metrics exported:
                           though real infra consumption continues — this
                           metric is the only one that still shows it.
 
+Cost Explorer's daily cost is an ESTIMATE that keeps revising for ~2-3 days
+after the day passes (measured: a Marketplace line item read 47% low one day
+after capture, settled to its final value by day 3). Every day is captured
+exactly once and Last9's TSDB accepts neither backfilled nor overwritten
+samples for the same (labels, timestamp) — so CAPTURE_OFFSET_DAYS (default 3)
+shifts what "today" means for this job's fetch window, capturing each day
+late enough that its estimate has already settled instead of catching it
+mid-revision.
+
 Deployment modes:
   Lambda  — deploy with deploy.sh; EventBridge triggers daily (recommended)
   Docker  — docker compose up (for local testing or non-AWS environments)
@@ -37,6 +46,16 @@ log = logging.getLogger(__name__)
 
 AWS_REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 DAYS_BACK = int(os.environ.get("DAYS_BACK", "1"))
+# Cost Explorer's daily estimate keeps revising for ~2-3 days after the day
+# passes (measured live 2026-08-31: a day captured at DAYS_BACK=1/OFFSET=0
+# read 47% low one day later — e.g. tazapay's Altinity line went from
+# $13.995 to its settled $20.522). Since Last9's TSDB accepts neither
+# backfilled nor overwritten samples for an existing (labels, timestamp)
+# pair, there is no way to correct a day after it's written — so capture
+# each day late enough that it's already settled instead. OFFSET shifts the
+# whole [start, end) window back by this many days; default 3 waits past
+# the observed drift window.
+CAPTURE_OFFSET_DAYS = int(os.environ.get("CAPTURE_OFFSET_DAYS", "3"))
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "86400"))
 
 OTLP_ENDPOINT = os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"]
@@ -81,7 +100,7 @@ def fetch_costs(ce: object) -> list[dict]:
     outer Filter to preserve the service × account × region combination.
     Returns flat list of {date, service, account_id, region, unblended, amortized}.
     """
-    end = datetime.now(tz=timezone.utc).date()
+    end = datetime.now(tz=timezone.utc).date() - timedelta(days=CAPTURE_OFFSET_DAYS)
     start = end - timedelta(days=DAYS_BACK)
     period = {"Start": str(start), "End": str(end)}
 
@@ -163,7 +182,7 @@ def fetch_undiscounted_costs(ce: object) -> dict[tuple[str, str, str, str], floa
     rather than a second parallel row list that would need its own
     attribute-building logic.
     """
-    end = datetime.now(tz=timezone.utc).date()
+    end = datetime.now(tz=timezone.utc).date() - timedelta(days=CAPTURE_OFFSET_DAYS)
     start = end - timedelta(days=DAYS_BACK)
     period = {"Start": str(start), "End": str(end)}
 
