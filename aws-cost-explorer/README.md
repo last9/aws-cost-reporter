@@ -57,6 +57,7 @@ docker compose up
 | `AWS_SECRET_ACCESS_KEY` | No* | — | AWS secret key (Docker only) |
 | `AWS_DEFAULT_REGION` | No | `us-east-1` | AWS region |
 | `DAYS_BACK` | No | `1` | Days of history to fetch per run. Set to `30`+ for initial backfill, then drop to `1`. |
+| `CAPTURE_OFFSET_DAYS` | No | `3` | Shifts the fetch window this many days into the past — see "Why capture is delayed" below. |
 | `POLL_INTERVAL_SECONDS` | No | `86400` | Re-poll interval for Docker mode |
 | `OTEL_SERVICE_NAME` | No | `aws-cost-reporter` | Service name in Last9 |
 
@@ -68,10 +69,21 @@ docker compose up
 |---|---|---|
 | `aws.cost.unblended` | USD | `aws.service`, `aws.account.id`, `aws.region`, `cost.date` |
 | `aws.cost.amortized` | USD | same — RI and Savings Plan effective rates applied |
+| `aws.cost.undiscounted` | USD | same — list-price cost, ignoring credits/discounts/Savings-Plan fees |
 
 The CE API caps `GroupBy` at 2 dimensions. Each run calls `GetDimensionValues` to list linked accounts, then runs one `GetCostAndUsage` per account filtered by `LINKED_ACCOUNT` and grouped by `SERVICE + REGION`. This preserves all three dimensions in a single series without exceeding the API limit.
 
+### `aws.cost.undiscounted` — why a third metric
+
+An account under a promotional or committed AWS credit shows `Credit == -Usage` in Cost Explorer every day, so `UnblendedCost`/`AmortizedCost` read ~$0 while real infra consumption continues unseen. `aws.cost.undiscounted` is a separate `GetCostAndUsage` call filtered to `RECORD_TYPE IN (Usage, SavingsPlanCoveredUsage)` — the only record types that carry positive consumption at on-demand value — so it stays meaningful even when the credit fully offsets the standard metrics. It's a positive filter (include only these types) rather than an exclude-list of every known discount/credit RECORD_TYPE, so a new AWS discount type added later is automatically excluded instead of silently leaking into the total.
+
 `cost.date` (`YYYY-MM-DD`) encodes the billing date as a label so each day forms a distinct series. This matters when `DAYS_BACK > 1`: without it, all fetched days share identical labels and only the last sample survives per series. At the default `DAYS_BACK=1`, `cost.date` adds one unique label value per run with no cardinality overhead.
+
+### Why capture is delayed by `CAPTURE_OFFSET_DAYS`
+
+Cost Explorer's daily cost is an **estimate** that keeps revising for roughly 2-3 days after the day passes — measured live: a Marketplace line item read 47% low the day after capture (`DAYS_BACK=1`/no offset), then settled to its final value by day 3. Each `(tenant, service, region, cost_date)` combination is written to Last9 exactly once, and Last9's TSDB accepts neither backfilled nor overwritten samples for the same labels+timestamp — so a day captured too early can never be corrected afterward.
+
+`CAPTURE_OFFSET_DAYS` (default `3`) shifts the whole fetch window back by this many days, so "yesterday" (with `DAYS_BACK=1`) becomes "3 days ago" — captured only after Cost Explorer's estimate has settled. The tradeoff: the report is `CAPTURE_OFFSET_DAYS` days behind "today" instead of 1. Do not lower this to chase freshness without accepting that recent days will read low until they settle.
 
 ## Dashboard
 

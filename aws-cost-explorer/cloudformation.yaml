@@ -28,6 +28,11 @@ Parameters:
     Default: 1
     Description: "Days of cost history to fetch per run. Use 1 for steady-state daily runs. Set to 30+ for initial backfill, then reduce to 1."
 
+  CaptureOffsetDays:
+    Type: Number
+    Default: 3
+    Description: "Shifts the fetch window this many days into the past. Cost Explorer's daily estimate keeps revising for ~2-3 days after the day passes, and a day can never be re-fetched/corrected once written to Last9 — this captures each day only after its estimate has settled."
+
   Schedule:
     Type: String
     Default: rate(1 day)
@@ -84,6 +89,7 @@ Resources:
           OTEL_EXPORTER_OTLP_HEADERS: !Ref OtlpHeaders
           OTEL_SERVICE_NAME: !Ref ServiceName
           DAYS_BACK: !Ref DaysBack
+          CAPTURE_OFFSET_DAYS: !Ref CaptureOffsetDays
           CUSTOM_LABELS: !Ref CustomLabels
       Code:
         S3Bucket: !Ref LambdaS3Bucket
