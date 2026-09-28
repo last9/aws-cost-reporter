@@ -86,6 +86,7 @@ if [[ "${USE_CF}" == "1" ]]; then
       LambdaS3Bucket="${CF_S3_BUCKET}" \
       LambdaS3Key="${CF_S3_KEY}" \
       DaysBack="${DAYS_BACK}" \
+      CaptureOffsetDays="${CAPTURE_OFFSET_DAYS}" \
       Schedule="${SCHEDULE}" \
       ServiceName="${OTEL_SERVICE_NAME}" \
       CustomLabels="${CUSTOM_LABELS}"

@@ -92,7 +92,16 @@ def _date_to_ns(date_str: str) -> str:
 # ── Cost Explorer fetch ────────────────────────────────────────────────────────
 
 
-def fetch_costs(ce: object) -> list[dict]:
+def _billing_period() -> dict[str, str]:
+    """[start, end) window shared by every fetch in one run. Computed once per
+    run so a collection that crosses UTC midnight can't query different
+    billing days for different metric families."""
+    end = datetime.now(tz=timezone.utc).date() - timedelta(days=CAPTURE_OFFSET_DAYS)
+    start = end - timedelta(days=DAYS_BACK)
+    return {"Start": str(start), "End": str(end)}
+
+
+def fetch_costs(ce: object, period: dict[str, str]) -> list[dict]:
     """
     Fetch daily costs grouped by SERVICE, REGION, looped per LINKED_ACCOUNT.
 
@@ -100,9 +109,6 @@ def fetch_costs(ce: object) -> list[dict]:
     outer Filter to preserve the service × account × region combination.
     Returns flat list of {date, service, account_id, region, unblended, amortized}.
     """
-    end = datetime.now(tz=timezone.utc).date() - timedelta(days=CAPTURE_OFFSET_DAYS)
-    start = end - timedelta(days=DAYS_BACK)
-    period = {"Start": str(start), "End": str(end)}
 
     accounts_resp = ce.get_dimension_values(
         TimePeriod=period, Dimension="LINKED_ACCOUNT"
@@ -157,14 +163,16 @@ def fetch_costs(ce: object) -> list[dict]:
     log.info(
         "Fetched %d cost rows (%s → %s, %d account(s))",
         len(rows),
-        start,
-        end,
+        period["Start"],
+        period["End"],
         len(accounts),
     )
     return rows
 
 
-def fetch_undiscounted_costs(ce: object) -> dict[tuple[str, str, str, str], float]:
+def fetch_undiscounted_costs(
+    ce: object, period: dict[str, str]
+) -> dict[tuple[str, str, str, str], float]:
     """
     Fetch daily list-price cost, filtered to RECORD_TYPE IN
     UNDISCOUNTED_RECORD_TYPES (Usage, SavingsPlanCoveredUsage only) — the
@@ -182,9 +190,6 @@ def fetch_undiscounted_costs(ce: object) -> dict[tuple[str, str, str, str], floa
     rather than a second parallel row list that would need its own
     attribute-building logic.
     """
-    end = datetime.now(tz=timezone.utc).date() - timedelta(days=CAPTURE_OFFSET_DAYS)
-    start = end - timedelta(days=DAYS_BACK)
-    period = {"Start": str(start), "End": str(end)}
 
     accounts_resp = ce.get_dimension_values(
         TimePeriod=period, Dimension="LINKED_ACCOUNT"
@@ -195,9 +200,18 @@ def fetch_undiscounted_costs(ce: object) -> dict[tuple[str, str, str, str], floa
     for account_id in accounts:
         next_token: str | None = None
         while True:
-            filters = [{"Dimensions": {"Key": "RECORD_TYPE", "Values": UNDISCOUNTED_RECORD_TYPES}}]
+            filters = [
+                {
+                    "Dimensions": {
+                        "Key": "RECORD_TYPE",
+                        "Values": UNDISCOUNTED_RECORD_TYPES,
+                    }
+                }
+            ]
             if account_id:
-                filters.append({"Dimensions": {"Key": "LINKED_ACCOUNT", "Values": [account_id]}})
+                filters.append(
+                    {"Dimensions": {"Key": "LINKED_ACCOUNT", "Values": [account_id]}}
+                )
             kwargs: dict = {
                 "TimePeriod": period,
                 "Granularity": "DAILY",
@@ -226,8 +240,13 @@ def fetch_undiscounted_costs(ce: object) -> dict[tuple[str, str, str, str], floa
             if not next_token:
                 break
 
-    log.info("Fetched %d undiscounted cost rows (%s → %s, %d account(s))",
-              len(out), start, end, len(accounts))
+    log.info(
+        "Fetched %d undiscounted cost rows (%s → %s, %d account(s))",
+        len(out),
+        period["Start"],
+        period["End"],
+        len(accounts),
+    )
     return out
 
 
@@ -252,7 +271,9 @@ def send_otlp_metrics(
         for k, v in custom_labels.items():
             attrs.append({"key": k, "value": {"stringValue": v}})
         if account_id:
-            attrs.append({"key": "aws.account.id", "value": {"stringValue": account_id}})
+            attrs.append(
+                {"key": "aws.account.id", "value": {"stringValue": account_id}}
+            )
         if region:
             attrs.append({"key": "aws.region", "value": {"stringValue": region}})
         attrs.append({"key": "cost.date", "value": {"stringValue": date}})
@@ -376,8 +397,9 @@ def send_otlp_metrics(
 
 
 def poll(ce: object) -> None:
-    rows = fetch_costs(ce)
-    undiscounted = fetch_undiscounted_costs(ce)
+    period = _billing_period()
+    rows = fetch_costs(ce, period)
+    undiscounted = fetch_undiscounted_costs(ce, period)
     send_otlp_metrics(rows, undiscounted)
 
 
@@ -410,10 +432,15 @@ def main() -> None:
 
 def lambda_handler(event: dict, context: object) -> dict:
     ce = boto3.client("ce", region_name="us-east-1")
-    rows = fetch_costs(ce)
-    undiscounted = fetch_undiscounted_costs(ce)
+    period = _billing_period()
+    rows = fetch_costs(ce, period)
+    undiscounted = fetch_undiscounted_costs(ce, period)
     send_otlp_metrics(rows, undiscounted)
-    return {"statusCode": 200, "exported": len(rows), "exported_undiscounted": len(undiscounted)}
+    return {
+        "statusCode": 200,
+        "exported": len(rows),
+        "exported_undiscounted": len(undiscounted),
+    }
 
 
 if __name__ == "__main__":
