@@ -190,6 +190,10 @@ print(json.dumps({"Variables": {
       --region "${AWS_REGION}" >/dev/null
   else
     echo "--> Creating Lambda function"
+    # Last9Managed=true is required by Last9-managed accounts whose IAM
+    # policy only grants lambda:CreateFunction when the request tags the
+    # new function this way (same tag-on-create guardrail as the IAM role
+    # above) — harmless on accounts without that restriction.
     aws lambda create-function \
       --function-name "${FUNCTION_NAME}" \
       --runtime "${RUNTIME}" \
@@ -199,6 +203,7 @@ print(json.dumps({"Variables": {
       --timeout 300 \
       --memory-size 256 \
       --environment "${ENV_VARS}" \
+      --tags Last9Managed=true \
       --region "${AWS_REGION}" >/dev/null
     # Newly created functions start in State=Pending; add-permission requires Active.
     aws lambda wait function-active \
@@ -215,10 +220,14 @@ print(json.dumps({"Variables": {
   RULE_NAME="${FUNCTION_NAME}-schedule"
 
   echo "--> Creating EventBridge rule: ${SCHEDULE}"
+  # Last9Managed=true tag: same tag-on-create guardrail as the IAM role and
+  # Lambda function above (events:PutRule is gated on aws:RequestTag there).
+  # Harmless to pass on every run, including updates to an existing rule.
   RULE_ARN=$(aws events put-rule \
     --name "${RULE_NAME}" \
     --schedule-expression "${SCHEDULE}" \
     --state ENABLED \
+    --tags Key=Last9Managed,Value=true \
     --region "${AWS_REGION}" \
     --query RuleArn \
     --output text)

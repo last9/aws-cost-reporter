@@ -195,7 +195,9 @@ def test_poll_uses_one_billing_window_across_utc_midnight() -> None:
     assert len(windows) == 1, f"one poll mixed billing windows: {windows}"
 
 
-def _run_deploy(use_cf: str, fail_get_role: bool = False) -> list[dict]:
+def _run_deploy(
+    use_cf: str, fail_get_role: bool = False, fail_get_function: bool = False
+) -> list[dict]:
     """Runs deploy.sh with aws/pip3/zip stubbed on PATH; returns every aws
     CLI invocation (plus the parsed --environment file, if any)."""
     import json
@@ -221,6 +223,14 @@ def _run_deploy(use_cf: str, fail_get_role: bool = False) -> list[dict]:
             "open(os.environ['STUB_AWS_LOG'], 'a').write(json.dumps(entry) + '\\n')\n"
             f"if args[:2] == ['iam', 'get-role'] and {fail_get_role!r}:\n"
             "    sys.exit(1)\n"
+            # Only the first get-function call is the existence check deploy.sh
+            # branches on; the later one (post-create) fetches FUNCTION_ARN and
+            # must succeed, so the failure is one-shot via a marker file.
+            f"if args[:2] == ['lambda', 'get-function'] and {fail_get_function!r}:\n"
+            "    marker = Path(os.environ['STUB_AWS_LOG'] + '.get_function_failed')\n"
+            "    if not marker.exists():\n"
+            "        marker.write_text('1')\n"
+            "        sys.exit(1)\n"
             "if args[:2] == ['sts', 'get-caller-identity']:\n"
             "    print('111111111111')\n"
             "else:\n"
@@ -276,6 +286,26 @@ def test_deploy_direct_lambda_tags_created_role() -> None:
     calls = _run_deploy("0", fail_get_role=True)
     args = next(c["args"] for c in calls if c["args"][:2] == ["iam", "create-role"])
     assert "--tags" in args, "create-role must tag the role Last9Managed=true"
+    tags = args[args.index("--tags") + 1]
+    assert "Key=Last9Managed,Value=true" in tags
+
+
+def test_deploy_direct_lambda_tags_created_function() -> None:
+    # Same stub-always-succeeds issue as above, but for `lambda get-function`
+    # — fail it to force the create-function path (not update-function-*).
+    calls = _run_deploy("0", fail_get_function=True)
+    args = next(
+        c["args"] for c in calls if c["args"][:2] == ["lambda", "create-function"]
+    )
+    assert "--tags" in args, "create-function must tag the function Last9Managed=true"
+    tags = args[args.index("--tags") + 1]
+    assert tags == "Last9Managed=true"
+
+
+def test_deploy_direct_lambda_tags_eventbridge_rule() -> None:
+    calls = _run_deploy("0")
+    args = next(c["args"] for c in calls if c["args"][:2] == ["events", "put-rule"])
+    assert "--tags" in args, "put-rule must tag the rule Last9Managed=true"
     tags = args[args.index("--tags") + 1]
     assert "Key=Last9Managed,Value=true" in tags
 
