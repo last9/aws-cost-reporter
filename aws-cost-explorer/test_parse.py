@@ -9,6 +9,8 @@ import os
 
 os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost")
 
+from datetime import UTC
+
 from main import (
     UNDISCOUNTED_RECORD_TYPES,
     _date_to_ns,
@@ -114,7 +116,7 @@ def test_fetch_costs_respects_capture_offset_days() -> None:
     env var."""
     import importlib
     import os
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     os.environ["CAPTURE_OFFSET_DAYS"] = "5"
     try:
@@ -123,7 +125,7 @@ def test_fetch_costs_respects_capture_offset_days() -> None:
         importlib.reload(main)
 
         period = main._billing_period()
-        expected_end = datetime.now(tz=timezone.utc).date() - timedelta(days=5)
+        expected_end = datetime.now(tz=UTC).date() - timedelta(days=5)
         assert period["End"] == str(expected_end), (
             f"expected End={expected_end} (today - CAPTURE_OFFSET_DAYS=5), got {period['End']}"
         )
@@ -157,22 +159,22 @@ def test_poll_uses_one_billing_window_across_utc_midnight() -> None:
     families must still query the same [start, end) — otherwise undiscounted
     describes a different day than unblended/amortized and, at DAYS_BACK=1,
     silently skips a day."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     import main
 
     ticks = iter(
         [
-            datetime(2026, 9, 15, 23, 59, 59, tzinfo=timezone.utc),
-            datetime(2026, 9, 16, 0, 0, 1, tzinfo=timezone.utc),
+            datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC),
+            datetime(2026, 9, 16, 0, 0, 1, tzinfo=UTC),
         ]
     )
 
     class _Clock(datetime):
         @classmethod
         def now(cls, tz=None):
-            return next(ticks, datetime(2026, 9, 16, 0, 0, 2, tzinfo=timezone.utc))
+            return next(ticks, datetime(2026, 9, 16, 0, 0, 2, tzinfo=UTC))
 
     periods: list[dict] = []
 
@@ -195,7 +197,9 @@ def test_poll_uses_one_billing_window_across_utc_midnight() -> None:
     assert len(windows) == 1, f"one poll mixed billing windows: {windows}"
 
 
-def _run_deploy(use_cf: str) -> list[dict]:
+def _run_deploy(
+    use_cf: str, fail_get_role: bool = False, fail_get_function: bool = False
+) -> list[dict]:
     """Runs deploy.sh with aws/pip3/zip stubbed on PATH; returns every aws
     CLI invocation (plus the parsed --environment file, if any)."""
     import json
@@ -219,6 +223,16 @@ def _run_deploy(use_cf: str) -> list[dict]:
             "    entry['environment'] = json.loads("
             "Path(v.removeprefix('file://')).read_text())\n"
             "open(os.environ['STUB_AWS_LOG'], 'a').write(json.dumps(entry) + '\\n')\n"
+            f"if args[:2] == ['iam', 'get-role'] and {fail_get_role!r}:\n"
+            "    sys.exit(1)\n"
+            # Only the first get-function call is the existence check deploy.sh
+            # branches on; the later one (post-create) fetches FUNCTION_ARN and
+            # must succeed, so the failure is one-shot via a marker file.
+            f"if args[:2] == ['lambda', 'get-function'] and {fail_get_function!r}:\n"
+            "    marker = Path(os.environ['STUB_AWS_LOG'] + '.get_function_failed')\n"
+            "    if not marker.exists():\n"
+            "        marker.write_text('1')\n"
+            "        sys.exit(1)\n"
             "if args[:2] == ['sts', 'get-caller-identity']:\n"
             "    print('111111111111')\n"
             "else:\n"
@@ -265,6 +279,37 @@ def test_deploy_direct_lambda_passes_capture_offset() -> None:
     env = next(c["environment"]["Variables"] for c in calls if "environment" in c)
     assert env["CAPTURE_OFFSET_DAYS"] == "7"
     assert env["DAYS_BACK"] == "2"
+
+
+def test_deploy_direct_lambda_tags_created_role() -> None:
+    # The stub's catch-all branch exits 0 for any unmatched command, so
+    # `aws iam get-role` always "succeeds" and deploy.sh takes the
+    # role-already-exists path. Fail it here to force the create-role path.
+    calls = _run_deploy("0", fail_get_role=True)
+    args = next(c["args"] for c in calls if c["args"][:2] == ["iam", "create-role"])
+    assert "--tags" in args, "create-role must tag the role Last9Managed=true"
+    tags = args[args.index("--tags") + 1]
+    assert "Key=Last9Managed,Value=true" in tags
+
+
+def test_deploy_direct_lambda_tags_created_function() -> None:
+    # Same stub-always-succeeds issue as above, but for `lambda get-function`
+    # — fail it to force the create-function path (not update-function-*).
+    calls = _run_deploy("0", fail_get_function=True)
+    args = next(
+        c["args"] for c in calls if c["args"][:2] == ["lambda", "create-function"]
+    )
+    assert "--tags" in args, "create-function must tag the function Last9Managed=true"
+    tags = args[args.index("--tags") + 1]
+    assert tags == "Last9Managed=true"
+
+
+def test_deploy_direct_lambda_tags_eventbridge_rule() -> None:
+    calls = _run_deploy("0")
+    args = next(c["args"] for c in calls if c["args"][:2] == ["events", "put-rule"])
+    assert "--tags" in args, "put-rule must tag the rule Last9Managed=true"
+    tags = args[args.index("--tags") + 1]
+    assert "Key=Last9Managed,Value=true" in tags
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ Usage:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
@@ -30,7 +30,7 @@ from main import aggregate_costs, send_otlp_metrics
 def _make_cur_df(days: int = 7) -> pd.DataFrame:
     """Build a minimal CUR-shaped DataFrame covering key line item types."""
     rows = []
-    today = datetime.now(tz=timezone.utc).date()
+    today = datetime.now(tz=UTC).date()
 
     services = [
         ("AmazonEC2", "us-east-1", "BoxUsage:t3.medium"),

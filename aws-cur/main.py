@@ -30,7 +30,7 @@ import logging
 import os
 import signal
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -86,7 +86,7 @@ def _parse_headers(raw: str) -> dict[str, str]:
 
 def _date_to_ns(date_str: str) -> str:
     """Convert YYYY-MM-DD to Unix nanosecond string for OTLP."""
-    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=12, tzinfo=timezone.utc)
+    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=12, tzinfo=UTC)
     return str(int(dt.timestamp() * 1_000_000_000))
 
 
