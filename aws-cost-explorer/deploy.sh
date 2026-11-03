@@ -16,6 +16,9 @@
 #
 # Optional overrides:
 #   FUNCTION_NAME=aws-cost-reporter   (default)
+#   ROLE_NAME=${FUNCTION_NAME}-role   (default; override when the account's
+#                                      PassRole policy expects a specific name,
+#                                      e.g. a Last9Managed-prefixed one)
 #   AWS_REGION=us-east-1              (default)
 #   DAYS_BACK=1                       (default; use 30+ for initial backfill)
 #   CAPTURE_OFFSET_DAYS=3             (default; Cost Explorer's daily estimate keeps
@@ -100,7 +103,7 @@ if [[ "${USE_CF}" == "1" ]]; then
 # ── 2b. Deploy via Lambda API (default) ────────────────────────────────────────
 
 else
-  ROLE_NAME="${FUNCTION_NAME}-role"
+  ROLE_NAME="${ROLE_NAME:-${FUNCTION_NAME}-role}"
   ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
   ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
