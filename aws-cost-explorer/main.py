@@ -34,7 +34,7 @@ import logging
 import os
 import signal
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import boto3
 import requests
@@ -85,7 +85,7 @@ def _parse_headers(raw: str) -> dict[str, str]:
 
 
 def _date_to_ns(date_str: str) -> str:
-    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=12, tzinfo=timezone.utc)
+    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=12, tzinfo=UTC)
     return str(int(dt.timestamp() * 1_000_000_000))
 
 
@@ -96,7 +96,7 @@ def _billing_period() -> dict[str, str]:
     """[start, end) window shared by every fetch in one run. Computed once per
     run so a collection that crosses UTC midnight can't query different
     billing days for different metric families."""
-    end = datetime.now(tz=timezone.utc).date() - timedelta(days=CAPTURE_OFFSET_DAYS)
+    end = datetime.now(tz=UTC).date() - timedelta(days=CAPTURE_OFFSET_DAYS)
     start = end - timedelta(days=DAYS_BACK)
     return {"Start": str(start), "End": str(end)}
 

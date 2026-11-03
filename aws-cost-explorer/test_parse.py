@@ -9,6 +9,8 @@ import os
 
 os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost")
 
+from datetime import UTC
+
 from main import (
     UNDISCOUNTED_RECORD_TYPES,
     _date_to_ns,
@@ -114,7 +116,7 @@ def test_fetch_costs_respects_capture_offset_days() -> None:
     env var."""
     import importlib
     import os
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     os.environ["CAPTURE_OFFSET_DAYS"] = "5"
     try:
@@ -123,7 +125,7 @@ def test_fetch_costs_respects_capture_offset_days() -> None:
         importlib.reload(main)
 
         period = main._billing_period()
-        expected_end = datetime.now(tz=timezone.utc).date() - timedelta(days=5)
+        expected_end = datetime.now(tz=UTC).date() - timedelta(days=5)
         assert period["End"] == str(expected_end), (
             f"expected End={expected_end} (today - CAPTURE_OFFSET_DAYS=5), got {period['End']}"
         )
@@ -157,22 +159,22 @@ def test_poll_uses_one_billing_window_across_utc_midnight() -> None:
     families must still query the same [start, end) — otherwise undiscounted
     describes a different day than unblended/amortized and, at DAYS_BACK=1,
     silently skips a day."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     import main
 
     ticks = iter(
         [
-            datetime(2026, 9, 15, 23, 59, 59, tzinfo=timezone.utc),
-            datetime(2026, 9, 16, 0, 0, 1, tzinfo=timezone.utc),
+            datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC),
+            datetime(2026, 9, 16, 0, 0, 1, tzinfo=UTC),
         ]
     )
 
     class _Clock(datetime):
         @classmethod
         def now(cls, tz=None):
-            return next(ticks, datetime(2026, 9, 16, 0, 0, 2, tzinfo=timezone.utc))
+            return next(ticks, datetime(2026, 9, 16, 0, 0, 2, tzinfo=UTC))
 
     periods: list[dict] = []
 
