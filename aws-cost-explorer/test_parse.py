@@ -195,7 +195,7 @@ def test_poll_uses_one_billing_window_across_utc_midnight() -> None:
     assert len(windows) == 1, f"one poll mixed billing windows: {windows}"
 
 
-def _run_deploy(use_cf: str) -> list[dict]:
+def _run_deploy(use_cf: str, fail_get_role: bool = False) -> list[dict]:
     """Runs deploy.sh with aws/pip3/zip stubbed on PATH; returns every aws
     CLI invocation (plus the parsed --environment file, if any)."""
     import json
@@ -219,6 +219,8 @@ def _run_deploy(use_cf: str) -> list[dict]:
             "    entry['environment'] = json.loads("
             "Path(v.removeprefix('file://')).read_text())\n"
             "open(os.environ['STUB_AWS_LOG'], 'a').write(json.dumps(entry) + '\\n')\n"
+            f"if args[:2] == ['iam', 'get-role'] and {fail_get_role!r}:\n"
+            "    sys.exit(1)\n"
             "if args[:2] == ['sts', 'get-caller-identity']:\n"
             "    print('111111111111')\n"
             "else:\n"
@@ -265,6 +267,17 @@ def test_deploy_direct_lambda_passes_capture_offset() -> None:
     env = next(c["environment"]["Variables"] for c in calls if "environment" in c)
     assert env["CAPTURE_OFFSET_DAYS"] == "7"
     assert env["DAYS_BACK"] == "2"
+
+
+def test_deploy_direct_lambda_tags_created_role() -> None:
+    # The stub's catch-all branch exits 0 for any unmatched command, so
+    # `aws iam get-role` always "succeeds" and deploy.sh takes the
+    # role-already-exists path. Fail it here to force the create-role path.
+    calls = _run_deploy("0", fail_get_role=True)
+    args = next(c["args"] for c in calls if c["args"][:2] == ["iam", "create-role"])
+    assert "--tags" in args, "create-role must tag the role Last9Managed=true"
+    tags = args[args.index("--tags") + 1]
+    assert "Key=Last9Managed,Value=true" in tags
 
 
 if __name__ == "__main__":

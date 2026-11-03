@@ -107,6 +107,10 @@ else
   NEW_ROLE=
   if ! aws iam get-role --role-name "${ROLE_NAME}" &>/dev/null; then
     echo "--> Creating IAM role ${ROLE_NAME}"
+    # Last9Managed=true is required by Last9-managed accounts whose
+    # IAM policy only grants iam:CreateRole when the request tags the new
+    # role this way (tag-on-create guardrail) — harmless on accounts
+    # without that restriction.
     aws iam create-role \
       --role-name "${ROLE_NAME}" \
       --assume-role-policy-document '{
@@ -116,7 +120,8 @@ else
           "Principal": {"Service": "lambda.amazonaws.com"},
           "Action": "sts:AssumeRole"
         }]
-      }' >/dev/null
+      }' \
+      --tags Key=Last9Managed,Value=true >/dev/null
     NEW_ROLE=1
   else
     echo "--> IAM role ${ROLE_NAME} already exists — reapplying policy"
